@@ -8,10 +8,10 @@
   "oauth2": true,
   "application_credentials": true,
   "config_flow": true,
-  "documentation": "https://github.com/your-github-user/ha-ekz-tariff",
-  "issue_tracker": "https://github.com/your-github-user/ha-ekz-tariff/issues",
+  "documentation": "https://github.com/cnc-lasercraft/ha-ekz-tariff",
+  "issue_tracker": "https://github.com/cnc-lasercraft/ha-ekz-tariff/issues",
   "iot_class": "cloud_polling",
   "integration_type": "hub",
   "requirements": [],
-  "version": "0.1.0"
+  "version": "1.0.0"
 }
