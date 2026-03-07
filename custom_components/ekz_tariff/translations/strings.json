@@ -1,0 +1,20 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Set up EKZ Tariff",
+        "description": "Configure the raw EKZ tariff integration.",
+        "data": {
+          "name": "Name",
+          "redirect_uri": "EKZ linking redirect URI",
+          "baseline_tariff_name": "Public baseline tariff name",
+          "publish_time": "Publish time (HH:MM)"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Reconnect EKZ Tariff",
+        "description": "Re-authenticate with myEKZ."
+      }
+    }
+  }
+}

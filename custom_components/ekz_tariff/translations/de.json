@@ -1,0 +1,22 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "EKZ Tariff einrichten",
+        "description": "Konfiguriere die rohe EKZ-Tarif-Integration.",
+        "data": {
+          "name": "Name",
+          "redirect_uri": "EKZ-Linking-Redirect-URI",
+          "baseline_tariff_name": "\u00d6ffentlicher Baseline-Tarifname",
+          "publish_time": "Publikationszeit (HH:MM)"
+        }
+      },
+      "reauth_confirm": {
+        "title": "EKZ Tariff erneut verbinden",
+        "description": "Bitte erneut bei myEKZ anmelden."
+      }
+    },
+    "error": {},
+    "abort": {}
+  }
+}
