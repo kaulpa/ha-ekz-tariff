@@ -1,59 +1,55 @@
-<svg width="1600" height="500" viewBox="0 0 1600 500" fill="none" xmlns="http://www.w3.org/2000/svg">
+<svg width="1600" height="520" viewBox="0 0 1600 520" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <linearGradient id="bg" x1="80" y1="40" x2="1520" y2="460" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#3CC8F5"/>
-      <stop offset="1" stop-color="#4169F6"/>
+    <linearGradient id="bg" x1="0" y1="0" x2="1600" y2="520">
+      <stop offset="0%" stop-color="#3CC8F5"/>
+      <stop offset="100%" stop-color="#4169F6"/>
     </linearGradient>
-    <linearGradient id="card" x1="170" y1="84" x2="610" y2="416" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#FFFFFF" stop-opacity="0.96"/>
-      <stop offset="1" stop-color="#F5F8FF" stop-opacity="0.98"/>
-    </linearGradient>
-    <filter id="shadow" x="110" y="44" width="540" height="412" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
-      <feDropShadow dx="0" dy="18" stdDeviation="22" flood-color="#193A8A" flood-opacity="0.25"/>
+    <filter id="shadow">
+      <feDropShadow dx="0" dy="15" stdDeviation="18" flood-color="#000000" flood-opacity="0.25"/>
     </filter>
   </defs>
 
-  <rect width="1600" height="500" rx="36" fill="url(#bg)"/>
+  <rect width="1600" height="520" rx="40" fill="url(#bg)"/>
 
-  <g opacity="0.12">
-    <circle cx="1400" cy="90" r="180" fill="white"/>
-    <circle cx="1510" cy="420" r="220" fill="white"/>
-    <circle cx="180" cy="420" r="140" fill="white"/>
-  </g>
-
+  <!-- LEFT ICON CARD -->
   <g filter="url(#shadow)">
-    <rect x="150" y="84" width="460" height="332" rx="46" fill="url(#card)"/>
+    <rect x="120" y="110" width="420" height="300" rx="40" fill="white"/>
   </g>
 
-  <rect x="260" y="136" width="180" height="124" rx="0" fill="#4A92F5"/>
-  <text x="350" y="219" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="78" font-weight="700" fill="white">EKZ</text>
+  <!-- EKZ LOGO BLOCK -->
+  <rect x="230" y="150" width="200" height="130" fill="#4A92F5"/>
+  <text x="330" y="235" text-anchor="middle" font-size="80" font-family="Arial" fill="white" font-weight="700">EKZ</text>
 
-  <path d="M499 213H563L620 266V362C620 387.405 599.405 408 574 408H308C282.595 408 262 387.405 262 362V213"
-        stroke="#4A82ED" stroke-width="18" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <path d="M563 213V266H620" stroke="#4A82ED" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
-  <text x="440" y="325" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="64" font-weight="300" fill="#4A82ED" letter-spacing="2">CHF</text>
-  <rect x="332" y="334" width="48" height="66" rx="4" fill="#4A82ED"/>
-  <rect x="410" y="302" width="48" height="98" rx="4" fill="#4A82ED"/>
-  <rect x="488" y="270" width="48" height="130" rx="4" fill="#4A82ED"/>
-  <path d="M314 385H570" stroke="#4A82ED" stroke-width="8" stroke-linecap="round" stroke-dasharray="1 22"/>
+  <!-- CHF -->
+  <text x="330" y="320" text-anchor="middle" font-size="60" font-family="Arial" fill="#4A82ED" font-weight="300">CHF</text>
 
-  <text x="730" y="190" font-family="Arial, Helvetica, sans-serif" font-size="74" font-weight="700" fill="white">EKZ Tariff</text>
-  <text x="730" y="250" font-family="Arial, Helvetica, sans-serif" font-size="30" font-weight="400" fill="rgba(255,255,255,0.92)">
-    Raw dynamic tariff data from EKZ for Home Assistant
+  <!-- GRAPH -->
+  <rect x="260" y="330" width="40" height="60" fill="#4A82ED"/>
+  <rect x="320" y="305" width="40" height="85" fill="#4A82ED"/>
+  <rect x="380" y="270" width="40" height="120" fill="#4A82ED"/>
+
+  <!-- TITLE -->
+  <text x="640" y="210" font-size="72" font-family="Arial" fill="white" font-weight="700">
+    EKZ Tariff
   </text>
 
-  <g>
-    <rect x="730" y="305" width="210" height="50" rx="25" fill="rgba(255,255,255,0.16)" stroke="rgba(255,255,255,0.28)"/>
-    <text x="835" y="338" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="600" fill="white">myEKZ OAuth</text>
-
-    <rect x="960" y="305" width="240" height="50" rx="25" fill="rgba(255,255,255,0.16)" stroke="rgba(255,255,255,0.28)"/>
-    <text x="1080" y="338" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="600" fill="white">96 Slots / Day</text>
-
-    <rect x="1220" y="305" width="180" height="50" rx="25" fill="rgba(255,255,255,0.16)" stroke="rgba(255,255,255,0.28)"/>
-    <text x="1310" y="338" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="600" fill="white">Baseline</text>
-  </g>
-
-  <text x="730" y="402" font-family="Arial, Helvetica, sans-serif" font-size="26" font-weight="400" fill="rgba(255,255,255,0.9)">
-    Designed as the provider layer for Tariff Saver
+  <text x="640" y="270" font-size="32" font-family="Arial" fill="white" opacity="0.9">
+    Raw dynamic electricity tariffs for Home Assistant
   </text>
+
+  <!-- TAGS -->
+  <rect x="640" y="310" width="220" height="50" rx="25" fill="rgba(255,255,255,0.18)"/>
+  <text x="750" y="343" text-anchor="middle" font-size="22" font-family="Arial" fill="white" font-weight="600">myEKZ OAuth</text>
+
+  <rect x="880" y="310" width="240" height="50" rx="25" fill="rgba(255,255,255,0.18)"/>
+  <text x="1000" y="343" text-anchor="middle" font-size="22" font-family="Arial" fill="white" font-weight="600">96 Slots / Day</text>
+
+  <rect x="1140" y="310" width="200" height="50" rx="25" fill="rgba(255,255,255,0.18)"/>
+  <text x="1240" y="343" text-anchor="middle" font-size="22" font-family="Arial" fill="white" font-weight="600">Baseline</text>
+
+  <!-- FOOTNOTE -->
+  <text x="640" y="420" font-size="26" font-family="Arial" fill="white" opacity="0.9">
+    Provider integration for Tariff Saver optimisation
+  </text>
+
 </svg>
