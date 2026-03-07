@@ -63,9 +63,8 @@ class EkzTariffCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 ems_instance_id=self.ems_instance_id,
                 redirect_uri=self.redirect_uri,
             )
-            self.link_status = str(status.get("link_status")) if isinstance(status, dict) else None
-            url = status.get("linking_process_redirect_uri") if isinstance(status, dict) else None
-            self.linking_url = str(url) if isinstance(url, str) else None
+            self.link_status = self.api.extract_link_status(status)
+            self.linking_url = self.api.extract_linking_url(status)
         except ConfigEntryAuthFailed:
             raise
         except EkzTariffAuthError as err:
@@ -73,18 +72,26 @@ class EkzTariffCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except Exception as err:
             raise UpdateFailed(f"myEKZ emsLinkStatus failed: {err}") from err
 
-        try:
-            active_payload = await self.api.fetch_customer_tariffs(ems_instance_id=self.ems_instance_id)
-        except ConfigEntryAuthFailed:
-            raise
-        except EkzTariffAuthError as err:
-            raise ConfigEntryAuthFailed(f"myEKZ auth failed during customerTariffs: {err}") from err
-        except Exception as err:
-            raise UpdateFailed(f"myEKZ customerTariffs failed: {err}") from err
+        active_payload: dict[str, Any] | None = None
+        active: list[PriceSlot] = []
+        if self.link_status == "linked":
+            try:
+                active_payload = await self.api.fetch_customer_tariffs(ems_instance_id=self.ems_instance_id)
+            except ConfigEntryAuthFailed:
+                raise
+            except EkzTariffAuthError as err:
+                raise ConfigEntryAuthFailed(f"myEKZ auth failed during customerTariffs: {err}") from err
+            except Exception as err:
+                raise UpdateFailed(f"myEKZ customerTariffs failed: {err}") from err
 
-        active = self._parse_prices(active_payload)
-        if not active:
-            raise UpdateFailed("myEKZ customerTariffs returned no price slots")
+            active = self._parse_prices(active_payload)
+            if not active:
+                raise UpdateFailed("myEKZ customerTariffs returned no price slots")
+        else:
+            _LOGGER.info(
+                "Skipping customerTariffs because EMS is not linked yet (link_status=%s)",
+                self.link_status,
+            )
 
         baseline_payload: dict[str, Any] | None = None
         baseline: list[PriceSlot] = []

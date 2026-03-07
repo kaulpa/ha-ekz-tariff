@@ -71,11 +71,11 @@ class EkzTariffLinkButton(ButtonEntity):
             await self._notify("EKZ Tariff – Linking", f"emsLinkStatus fehlgeschlagen: {err}")
             return
 
-        self._last_status = str(data.get("link_status") or "")
+        self._last_status = self.coordinator.api.extract_link_status(data) or ""
         self._last_url = None
 
         if self._last_status == "link_required":
-            url = data.get("linking_process_redirect_uri")
+            url = self.coordinator.api.extract_linking_url(data)
             if isinstance(url, str) and url.startswith("http"):
                 self._last_url = url
                 await self._notify(

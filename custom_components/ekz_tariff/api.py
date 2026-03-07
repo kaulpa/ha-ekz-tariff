@@ -93,6 +93,29 @@ class EkzTariffApi:
             raise EkzTariffApiError(f"Unexpected emsLinkStatus payload: {data!r}")
         return data
 
+
+    @staticmethod
+    def extract_link_status(payload: Any) -> str | None:
+        """Extract EMS link status from a possibly varying payload shape."""
+        if not isinstance(payload, dict):
+            return None
+        for key in ("link_status", "status", "ems_link_status"):
+            value = payload.get(key)
+            if isinstance(value, str) and value:
+                return value
+        return None
+
+    @staticmethod
+    def extract_linking_url(payload: Any) -> str | None:
+        """Extract linking URL from a possibly varying payload shape."""
+        if not isinstance(payload, dict):
+            return None
+        for key in ("linking_process_redirect_uri", "redirect_uri", "linking_url"):
+            value = payload.get(key)
+            if isinstance(value, str) and value:
+                return value
+        return None
+
     async def fetch_customer_tariffs(
         self,
         *,
