@@ -45,6 +45,8 @@ class EkzTariffApi:
         url = f"{self.BASE_URL}/tariffs"
         _LOGGER.debug("EKZ GET %s params=%s", url, params)
         async with self._session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+            text = await resp.text()
+            _LOGGER.debug("public tariffs status=%s body=%s", resp.status, text[:2000])
             resp.raise_for_status()
             payload: Any = await resp.json()
 
@@ -87,6 +89,7 @@ class EkzTariffApi:
                 if resp.status >= 400:
                     raise EkzTariffApiError(f"EKZ API error {resp.status}: {text}")
                 data: Any = await resp.json()
+                _LOGGER.debug("emsLinkStatus parsed payload=%r", data)
         except ClientError as err:
             raise EkzTariffApiError(f"HTTP error calling emsLinkStatus: {err}") from err
 
@@ -125,6 +128,8 @@ class EkzTariffApi:
                 data: Any = await resp.json()
         except ClientError as err:
             raise EkzTariffApiError(f"HTTP error calling customerTariffs: {err}") from err
+
+        _LOGGER.debug("customerTariffs parsed payload=%r", data)
 
         if isinstance(data, list):
             return {"prices": [x for x in data if isinstance(x, dict)], "publication_timestamp": None}
