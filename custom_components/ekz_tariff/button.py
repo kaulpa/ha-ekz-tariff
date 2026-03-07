@@ -5,6 +5,7 @@ import logging
 from typing import Any
 
 from homeassistant.components.button import ButtonEntity
+from homeassistant.components.persistent_notification import async_create as async_create_notification
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -71,11 +72,11 @@ class EkzTariffLinkButton(ButtonEntity):
             await self._notify("EKZ Tariff – Linking", f"emsLinkStatus fehlgeschlagen: {err}")
             return
 
-        self._last_status = self.coordinator.api.extract_link_status(data) or ""
+        self._last_status = str(data.get("link_status") or "")
         self._last_url = None
 
         if self._last_status == "link_required":
-            url = self.coordinator.api.extract_linking_url(data)
+            url = data.get("linking_process_redirect_uri")
             if isinstance(url, str) and url.startswith("http"):
                 self._last_url = url
                 await self._notify(
@@ -95,7 +96,8 @@ class EkzTariffLinkButton(ButtonEntity):
         self.async_write_ha_state()
 
     async def _notify(self, title: str, message: str) -> None:
-        await self.coordinator.hass.components.persistent_notification.async_create(
+        async_create_notification(
+            self.coordinator.hass,
             message=message,
             title=title,
             notification_id=f"{DOMAIN}_{self.entry.entry_id}_ekz_link",
