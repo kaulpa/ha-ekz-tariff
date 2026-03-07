@@ -38,7 +38,7 @@ It is intentionally focused on **provider functionality only** and contains **no
 ## Architecture
 
 <p align="center">
-  <img src="architecture-diagram.svg" alt="Architecture diagram" width="850">
+  <img src="architecture-diagram.png" alt="Architecture diagram" width="850">
 </p>
 
 EKZ Tariff is the **raw data provider layer**.  
