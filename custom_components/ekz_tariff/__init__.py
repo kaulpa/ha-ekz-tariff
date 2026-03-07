@@ -1,7 +1,9 @@
 """EKZ Tariff integration."""
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime, time, timedelta
+from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -15,6 +17,47 @@ from .const import DOMAIN, PLATFORMS, CONF_PUBLISH_TIME, DEFAULT_PUBLISH_TIME
 from .coordinator import EkzTariffCoordinator
 
 RETRY_INTERVAL = timedelta(minutes=30)
+
+
+def get_coordinator(hass: HomeAssistant, entry_id: str) -> EkzTariffCoordinator:
+    """Return the coordinator for a config entry."""
+    coordinator = hass.data.get(DOMAIN, {}).get(entry_id)
+    if not isinstance(coordinator, EkzTariffCoordinator):
+        raise KeyError(f"EKZ Tariff entry not loaded: {entry_id}")
+    return coordinator
+
+
+def get_provider_data(hass: HomeAssistant, entry_id: str) -> dict[str, Any]:
+    """Return raw provider data for other integrations.
+
+    This intentionally exposes the full 15-minute slot lists from the coordinator
+    without putting them into Home Assistant state attributes.
+    """
+    coordinator = get_coordinator(hass, entry_id)
+    data = coordinator.data or {}
+    active = data.get("active") if isinstance(data, Mapping) else []
+    baseline = data.get("baseline") if isinstance(data, Mapping) else []
+    return {
+        "entry_id": entry_id,
+        "provider": DOMAIN,
+        "active_slots": list(active) if isinstance(active, list) else [],
+        "baseline_slots": list(baseline) if isinstance(baseline, list) else [],
+        "active_publication_timestamp": data.get("active_publication_timestamp") if isinstance(data, Mapping) else None,
+        "baseline_publication_timestamp": data.get("baseline_publication_timestamp") if isinstance(data, Mapping) else None,
+        "baseline_tariff_name": data.get("baseline_tariff_name") if isinstance(data, Mapping) else None,
+        "link_status": data.get("link_status") if isinstance(data, Mapping) else None,
+        "linking_url": data.get("linking_url") if isinstance(data, Mapping) else None,
+        "last_api_success_utc": coordinator.last_api_success_utc,
+    }
+
+
+def get_first_provider_data(hass: HomeAssistant) -> dict[str, Any]:
+    """Return raw provider data for the first loaded EKZ Tariff entry."""
+    domain_data = hass.data.get(DOMAIN, {})
+    for entry_id, coordinator in domain_data.items():
+        if isinstance(coordinator, EkzTariffCoordinator):
+            return get_provider_data(hass, entry_id)
+    raise KeyError("No loaded EKZ Tariff entry found")
 
 
 def _parse_hhmm(value: str) -> tuple[int, int]:
