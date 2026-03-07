@@ -25,6 +25,7 @@ class EkzTariffAuthError(EkzTariffApiError):
 class EkzTariffApi:
     BASE_URL: Final[str] = "https://api.tariffs.ekz.ch/v1"
     CHF_PER_KWH_UNITS: Final[set[str]] = {"CHF_kWh", "CHF/kWh"}
+    IGNORED_COMPONENT_KEYS: Final[set[str]] = {"feed_in", "refund_storage"}
 
     def __init__(self, session: aiohttp.ClientSession, oauth_session: OAuth2Session | None = None) -> None:
         self._session = session
@@ -92,29 +93,6 @@ class EkzTariffApi:
         if not isinstance(data, dict):
             raise EkzTariffApiError(f"Unexpected emsLinkStatus payload: {data!r}")
         return data
-
-
-    @staticmethod
-    def extract_link_status(payload: Any) -> str | None:
-        """Extract EMS link status from a possibly varying payload shape."""
-        if not isinstance(payload, dict):
-            return None
-        for key in ("link_status", "status", "ems_link_status"):
-            value = payload.get(key)
-            if isinstance(value, str) and value:
-                return value
-        return None
-
-    @staticmethod
-    def extract_linking_url(payload: Any) -> str | None:
-        """Extract linking URL from a possibly varying payload shape."""
-        if not isinstance(payload, dict):
-            return None
-        for key in ("linking_process_redirect_uri", "redirect_uri", "linking_url"):
-            value = payload.get(key)
-            if isinstance(value, str) and value:
-                return value
-        return None
 
     async def fetch_customer_tariffs(
         self,
@@ -190,6 +168,8 @@ class EkzTariffApi:
         out: dict[str, float] = {}
         for key, val in price_item.items():
             if key in ("start_timestamp", "end_timestamp", "publication_timestamp"):
+                continue
+            if key in cls.IGNORED_COMPONENT_KEYS:
                 continue
 
             s = cls._sum_list_unit(val)

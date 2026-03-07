@@ -27,9 +27,7 @@ COMPONENT_KEYS: tuple[str, ...] = (
     "grid",
     "regional_fees",
     "metering",
-    "refund_storage",
     "integrated",
-    "feed_in",
 )
 
 
