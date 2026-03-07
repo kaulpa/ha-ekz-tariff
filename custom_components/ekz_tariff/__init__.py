@@ -72,10 +72,41 @@ def _parse_hhmm(value: str) -> tuple[int, int]:
     return 18, 15
 
 
+def _expected_slots_for_local_day(day: datetime.date) -> int:
+    """Return expected 15-minute slot count for the local day.
+
+    Handles DST transition days as well.
+    """
+    tz = dt_util.DEFAULT_TIME_ZONE
+    start_local = datetime.combine(day, time(0, 0), tzinfo=tz)
+    next_day = day + timedelta(days=1)
+    end_local = datetime.combine(next_day, time(0, 0), tzinfo=tz)
+    start_utc = dt_util.as_utc(start_local)
+    end_utc = dt_util.as_utc(end_local)
+    seconds = max(0, int((end_utc - start_utc).total_seconds()))
+    return max(1, seconds // 900)
+
+
+def _slot_count_for_local_day(slots: Any, day: datetime.date) -> int:
+    if not isinstance(slots, list):
+        return 0
+    count = 0
+    for slot in slots:
+        start = getattr(slot, "start", None)
+        if isinstance(start, datetime) and dt_util.as_local(start).date() == day:
+            count += 1
+    return count
+
+
 def _has_valid_prices(coordinator: EkzTariffCoordinator) -> bool:
     data = coordinator.data or {}
-    active = data.get("active") if isinstance(data, dict) else None
-    return isinstance(active, list) and bool(active)
+    if not isinstance(data, dict):
+        return False
+    today = dt_util.now().date()
+    expected = _expected_slots_for_local_day(today)
+    active_count = _slot_count_for_local_day(data.get("active"), today)
+    baseline_count = _slot_count_for_local_day(data.get("baseline"), today)
+    return active_count >= expected and baseline_count >= expected
 
 
 def _next_local_midnight(now_local: datetime) -> datetime:
