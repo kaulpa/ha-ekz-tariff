@@ -1,7 +1,7 @@
 # EKZ Tariff
 
 <p align="center">
-  <img src="banner.svg" alt="EKZ Tariff banner" width="100%">
+  <img src="banner.png" alt="EKZ Tariff banner" width="100%">
 </p>
 
 <p align="center">
