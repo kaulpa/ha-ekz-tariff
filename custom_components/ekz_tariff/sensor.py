@@ -22,12 +22,13 @@ ALLIN_COMPONENTS: tuple[str, ...] = (
     "regional_fees",
     "metering",
 )
-COMPONENT_KEYS: tuple[str, ...] = (
+ACTIVE_COMPONENT_KEYS: tuple[str, ...] = (
     "electricity",
     "grid",
     "regional_fees",
-    "metering",
-    "integrated",
+)
+BASELINE_COMPONENT_KEYS: tuple[str, ...] = (
+    "electricity",
 )
 
 
@@ -44,17 +45,6 @@ def _slots(coordinator: EkzTariffCoordinator, kind: str) -> list[PriceSlot]:
     data = coordinator.data or {}
     values = data.get(kind, []) if isinstance(data, dict) else []
     return values if isinstance(values, list) else []
-
-
-def _available_components(coordinator: EkzTariffCoordinator, kind: str) -> tuple[str, ...]:
-    found: set[str] = set()
-    for slot in _slots(coordinator, kind):
-        comps = slot.components_chf_per_kwh or {}
-        for key in COMPONENT_KEYS:
-            value = comps.get(key)
-            if isinstance(value, (int, float)) and float(value) != 0.0:
-                found.add(key)
-    return tuple(key for key in COMPONENT_KEYS if key in found)
 
 
 def _current_slot(slots: list[PriceSlot]) -> PriceSlot | None:
@@ -114,10 +104,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         EkzTariffLastApiSuccessSensor(coordinator, entry),
     ]
 
-    for component in _available_components(coordinator, "active"):
+    for component in ACTIVE_COMPONENT_KEYS:
         entities.append(EkzTariffPriceComponentNowSensor(coordinator, entry, component, False))
 
-    for component in _available_components(coordinator, "baseline"):
+    for component in BASELINE_COMPONENT_KEYS:
         entities.append(EkzTariffPriceComponentNowSensor(coordinator, entry, component, True))
 
     async_add_entities(entities, update_before_add=True)
@@ -302,7 +292,12 @@ class EkzTariffLinkingUrlSensor(CoordinatorEntity[EkzTariffCoordinator], SensorE
     @property
     def native_value(self) -> str | None:
         value = getattr(self.coordinator, "linking_url", None)
-        return str(value) if value else None
+        return "available" if value else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        value = getattr(self.coordinator, "linking_url", None)
+        return {"url": str(value)} if value else {}
 
 
 class EkzTariffLastApiSuccessSensor(CoordinatorEntity[EkzTariffCoordinator], SensorEntity):
