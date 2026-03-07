@@ -63,8 +63,8 @@ class EkzTariffCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 ems_instance_id=self.ems_instance_id,
                 redirect_uri=self.redirect_uri,
             )
-            self.link_status = self.api.extract_link_status(status)
-            self.linking_url = self.api.extract_linking_url(status)
+            self.link_status = self._extract_link_status(status)
+            self.linking_url = self._extract_linking_url(status)
         except ConfigEntryAuthFailed:
             raise
         except EkzTariffAuthError as err:
@@ -72,11 +72,13 @@ class EkzTariffCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except Exception as err:
             raise UpdateFailed(f"myEKZ emsLinkStatus failed: {err}") from err
 
-        active_payload: dict[str, Any] | None = None
+        active_payload: dict[str, Any] = {"prices": [], "publication_timestamp": None}
         active: list[PriceSlot] = []
-        if self.link_status == "linked":
+        if self._is_linked_status(self.link_status):
             try:
-                active_payload = await self.api.fetch_customer_tariffs(ems_instance_id=self.ems_instance_id)
+                fetched_active_payload = await self.api.fetch_customer_tariffs(ems_instance_id=self.ems_instance_id)
+                if isinstance(fetched_active_payload, dict):
+                    active_payload = fetched_active_payload
             except ConfigEntryAuthFailed:
                 raise
             except EkzTariffAuthError as err:
@@ -88,10 +90,7 @@ class EkzTariffCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if not active:
                 raise UpdateFailed("myEKZ customerTariffs returned no price slots")
         else:
-            _LOGGER.info(
-                "Skipping customerTariffs because EMS is not linked yet (link_status=%s)",
-                self.link_status,
-            )
+            _LOGGER.info("Skipping customerTariffs because EMS link is not active: %s", self.link_status)
 
         baseline_payload: dict[str, Any] | None = None
         baseline: list[PriceSlot] = []
@@ -145,6 +144,46 @@ class EkzTariffCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
         out = {s.start: s for s in sorted(slots, key=lambda s: s.start)}
         return list(out.values())
+
+
+    @staticmethod
+    def _extract_link_status(payload: Any) -> str | None:
+        if not isinstance(payload, dict):
+            return None
+        for key in ("link_status", "linkStatus", "status"):
+            value = payload.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        link = payload.get("link")
+        if isinstance(link, dict):
+            for key in ("status", "link_status", "linkStatus"):
+                value = link.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+        return None
+
+    @staticmethod
+    def _extract_linking_url(payload: Any) -> str | None:
+        if not isinstance(payload, dict):
+            return None
+        for key in ("linking_process_redirect_uri", "linkingUrl", "link_url", "url"):
+            value = payload.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        link = payload.get("link")
+        if isinstance(link, dict):
+            for key in ("url", "linking_process_redirect_uri", "linkingUrl", "link_url"):
+                value = link.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+        return None
+
+    @staticmethod
+    def _is_linked_status(value: str | None) -> bool:
+        if not value:
+            return False
+        normalized = value.strip().lower().replace("-", "_").replace(" ", "_")
+        return normalized in {"linked", "active", "ok", "connected", "success"}
 
     @staticmethod
     def _parse_publication_timestamp(value: Any) -> datetime | None:
