@@ -183,7 +183,15 @@ class EkzTariffCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not value:
             return False
         normalized = value.strip().lower().replace("-", "_").replace(" ", "_")
-        return normalized in {"linked", "active", "ok", "connected", "success"}
+        return normalized in {
+            "linked",
+            "link_established",
+            "linkestablished",
+            "active",
+            "ok",
+            "connected",
+            "success",
+        }
 
     @staticmethod
     def _parse_publication_timestamp(value: Any) -> datetime | None:
