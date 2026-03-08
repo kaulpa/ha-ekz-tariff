@@ -30,9 +30,10 @@ COMPONENT_KEYS: tuple[str, ...] = (
     "grid",
     "regional_fees",
     "metering",
-    "refund_storage",
     "integrated",
-    "feed_in",
+)
+BASELINE_COMPONENT_KEYS: tuple[str, ...] = (
+    "electricity",
 )
 
 
@@ -75,19 +76,6 @@ def _next_slot(slots: list[PriceSlot]) -> PriceSlot | None:
     return None
 
 
-
-
-def _tomorrow_slots(slots: list[PriceSlot]) -> list[PriceSlot]:
-    if not slots:
-        return []
-    local_today = dt_util.now().date()
-    local_tomorrow = local_today + timedelta(days=1)
-    return [
-        slot
-        for slot in slots
-        if dt_util.as_local(slot.start).date() == local_tomorrow
-    ]
-
 def _curve_attrs(slots: list[PriceSlot], publication_timestamp: datetime | None) -> dict[str, Any]:
     if not slots:
         return {"slot_count": 0, "publication_timestamp": publication_timestamp.isoformat() if publication_timestamp else None}
@@ -102,6 +90,12 @@ def _curve_attrs(slots: list[PriceSlot], publication_timestamp: datetime | None)
     }
 
 
+def _tomorrow_slots(slots: list[PriceSlot]) -> list[PriceSlot]:
+    local_tz = dt_util.DEFAULT_TIME_ZONE
+    tomorrow = dt_util.now().date() + timedelta(days=1)
+    return [slot for slot in slots if slot.start.astimezone(local_tz).date() == tomorrow]
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     coordinator: EkzTariffCoordinator = hass.data[DOMAIN][entry.entry_id]
 
@@ -113,11 +107,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         EkzTariffNextPriceSensor(coordinator, entry, "active", "price_next", "Next price"),
         EkzTariffNextPriceSensor(coordinator, entry, "baseline", "baseline_price_next", "Baseline next price"),
         EkzTariffPriceAllInNowSensor(coordinator, entry, "active", "price_allin_now", "Price all-in now"),
-        EkzTariffPriceAllInNowSensor(coordinator, entry, "baseline", "baseline_price_allin_now", "Baseline price all-in now"),
-        EkzTariffPublicationTimestampSensor(coordinator, entry, False),
-        EkzTariffPublicationTimestampSensor(coordinator, entry, True),
         EkzTariffTomorrowAvailableSensor(coordinator, entry),
         EkzTariffTomorrowSlotCountSensor(coordinator, entry),
+        EkzTariffPublicationTimestampSensor(coordinator, entry, False),
+        EkzTariffPublicationTimestampSensor(coordinator, entry, True),
         EkzTariffLinkStatusSensor(coordinator, entry),
         EkzTariffLinkingUrlSensor(coordinator, entry),
         EkzTariffLastApiSuccessSensor(coordinator, entry),
@@ -125,6 +118,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 
     for component in COMPONENT_KEYS:
         entities.append(EkzTariffPriceComponentNowSensor(coordinator, entry, component, False))
+
+    for component in BASELINE_COMPONENT_KEYS:
         entities.append(EkzTariffPriceComponentNowSensor(coordinator, entry, component, True))
 
     async_add_entities(entities, update_before_add=True)
@@ -232,9 +227,46 @@ class EkzTariffPriceAllInNowSensor(CoordinatorEntity[EkzTariffCoordinator], Sens
         }
 
 
+class EkzTariffTomorrowAvailableSensor(CoordinatorEntity[EkzTariffCoordinator], SensorEntity):
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:calendar-check"
+
+    def __init__(self, coordinator: EkzTariffCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator)
+        self._attr_name = "Tomorrow available"
+        self._attr_unique_id = f"{entry.entry_id}_tomorrow_available"
+        self._attr_device_info = _device_info(entry)
+
+    @property
+    def native_value(self) -> bool:
+        return len(_tomorrow_slots(_slots(self.coordinator, "active"))) > 0
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        tomorrow_slots = _tomorrow_slots(_slots(self.coordinator, "active"))
+        return {
+            "tomorrow_slot_count": len(tomorrow_slots),
+            "first_tomorrow_slot_utc": tomorrow_slots[0].start.isoformat() if tomorrow_slots else None,
+        }
+
+
+class EkzTariffTomorrowSlotCountSensor(CoordinatorEntity[EkzTariffCoordinator], SensorEntity):
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:counter"
+
+    def __init__(self, coordinator: EkzTariffCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator)
+        self._attr_name = "Tomorrow slot count"
+        self._attr_unique_id = f"{entry.entry_id}_tomorrow_slot_count"
+        self._attr_device_info = _device_info(entry)
+
+    @property
+    def native_value(self) -> int:
+        return len(_tomorrow_slots(_slots(self.coordinator, "active")))
+
+
 class EkzTariffPriceComponentNowSensor(CoordinatorEntity[EkzTariffCoordinator], SensorEntity):
     _attr_has_entity_name = True
-    _attr_native_unit_of_measurement = "CHF/kWh"
     _attr_icon = "mdi:currency-chf"
 
     def __init__(self, coordinator: EkzTariffCoordinator, entry: ConfigEntry, component: str, baseline: bool) -> None:
@@ -248,11 +280,18 @@ class EkzTariffPriceComponentNowSensor(CoordinatorEntity[EkzTariffCoordinator], 
         self._attr_device_info = _device_info(entry)
 
     @property
+    def native_unit_of_measurement(self) -> str:
+        return "CHF/month" if self._component == "metering" else "CHF/kWh"
+
+    @property
     def native_value(self) -> float | None:
         slot = _current_slot(_slots(self.coordinator, self._kind))
         if not slot:
             return None
-        value = (slot.components_chf_per_kwh or {}).get(self._component)
+        if self._component == "metering":
+            value = (slot.components_chf_per_month or {}).get(self._component)
+        else:
+            value = (slot.components_chf_per_kwh or {}).get(self._component)
         return float(value) if isinstance(value, (int, float)) else None
 
 
@@ -338,43 +377,3 @@ class EkzTariffLastApiSuccessSensor(CoordinatorEntity[EkzTariffCoordinator], Sen
         data = self.coordinator.data or {}
         value = data.get("last_api_success")
         return value if isinstance(value, datetime) else None
-
-
-class EkzTariffTomorrowAvailableSensor(CoordinatorEntity[EkzTariffCoordinator], SensorEntity):
-    _attr_has_entity_name = True
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _attr_icon = "mdi:calendar-arrow-right"
-
-    def __init__(self, coordinator: EkzTariffCoordinator, entry: ConfigEntry) -> None:
-        super().__init__(coordinator)
-        self._attr_name = "Tomorrow available"
-        self._attr_unique_id = f"{entry.entry_id}_tomorrow_available"
-        self._attr_device_info = _device_info(entry)
-
-    @property
-    def native_value(self) -> str:
-        return "on" if _tomorrow_slots(_slots(self.coordinator, "active")) else "off"
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        tomorrow_slots = _tomorrow_slots(_slots(self.coordinator, "active"))
-        return {
-            "tomorrow_slot_count": len(tomorrow_slots),
-            "first_tomorrow_slot_utc": tomorrow_slots[0].start.isoformat() if tomorrow_slots else None,
-        }
-
-
-class EkzTariffTomorrowSlotCountSensor(CoordinatorEntity[EkzTariffCoordinator], SensorEntity):
-    _attr_has_entity_name = True
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _attr_icon = "mdi:counter"
-
-    def __init__(self, coordinator: EkzTariffCoordinator, entry: ConfigEntry) -> None:
-        super().__init__(coordinator)
-        self._attr_name = "Tomorrow slot count"
-        self._attr_unique_id = f"{entry.entry_id}_tomorrow_slot_count"
-        self._attr_device_info = _device_info(entry)
-
-    @property
-    def native_value(self) -> int:
-        return len(_tomorrow_slots(_slots(self.coordinator, "active")))
