@@ -15,20 +15,24 @@ from homeassistant.util import dt as dt_util
 from .const import DOMAIN
 from .coordinator import EkzTariffCoordinator, PriceSlot
 
+# IMPORTANT:
+# EKZ exposes an "integrated" component, but the real all-in tariff used in the
+# EKZ tariff sheet is electricity + grid + regional_fees.
+# Therefore "price_allin_now" must NOT sum "integrated" together with the other
+# components, otherwise the price is counted twice.
 ALLIN_COMPONENTS: tuple[str, ...] = (
-    "integrated",
+    "electricity",
+    "grid",
+    "regional_fees",
+)
+COMPONENT_KEYS: tuple[str, ...] = (
     "electricity",
     "grid",
     "regional_fees",
     "metering",
-)
-ACTIVE_COMPONENT_KEYS: tuple[str, ...] = (
-    "electricity",
-    "grid",
-    "regional_fees",
-)
-BASELINE_COMPONENT_KEYS: tuple[str, ...] = (
-    "electricity",
+    "refund_storage",
+    "integrated",
+    "feed_in",
 )
 
 
@@ -104,10 +108,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         EkzTariffLastApiSuccessSensor(coordinator, entry),
     ]
 
-    for component in ACTIVE_COMPONENT_KEYS:
+    for component in COMPONENT_KEYS:
         entities.append(EkzTariffPriceComponentNowSensor(coordinator, entry, component, False))
-
-    for component in BASELINE_COMPONENT_KEYS:
         entities.append(EkzTariffPriceComponentNowSensor(coordinator, entry, component, True))
 
     async_add_entities(entities, update_before_add=True)
@@ -204,13 +206,14 @@ class EkzTariffPriceAllInNowSensor(CoordinatorEntity[EkzTariffCoordinator], Sens
         if not slot:
             return {}
         comps = slot.components_chf_per_kwh or {}
-        api_integrated = comps.get("integrated")
         summed = sum(float(comps.get(c, 0.0) or 0.0) for c in ALLIN_COMPONENTS)
+        api_integrated = comps.get("integrated")
         return {
             "slot_start_utc": slot.start.isoformat(),
             "sum_components": round(summed, 6),
             "api_integrated": float(api_integrated) if isinstance(api_integrated, (int, float)) else None,
             "components_used": list(ALLIN_COMPONENTS),
+            "calculation_note": "all-in is calculated from electricity + grid + regional_fees",
         }
 
 
@@ -263,56 +266,60 @@ class EkzTariffPublicationTimestampSensor(CoordinatorEntity[EkzTariffCoordinator
 
 class EkzTariffLinkStatusSensor(CoordinatorEntity[EkzTariffCoordinator], SensorEntity):
     _attr_has_entity_name = True
-    _attr_name = "Link status"
-    _attr_icon = "mdi:link-variant"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:link"
 
     def __init__(self, coordinator: EkzTariffCoordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator)
+        self._attr_name = "Link status"
         self._attr_unique_id = f"{entry.entry_id}_link_status"
         self._attr_device_info = _device_info(entry)
 
     @property
     def native_value(self) -> str | None:
-        value = getattr(self.coordinator, "link_status", None)
+        data = self.coordinator.data or {}
+        value = data.get("link_status")
         return str(value) if value is not None else None
 
 
 class EkzTariffLinkingUrlSensor(CoordinatorEntity[EkzTariffCoordinator], SensorEntity):
     _attr_has_entity_name = True
-    _attr_name = "Linking URL"
-    _attr_icon = "mdi:link-box-variant"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:link-variant"
 
     def __init__(self, coordinator: EkzTariffCoordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator)
+        self._attr_name = "Linking URL"
         self._attr_unique_id = f"{entry.entry_id}_linking_url"
         self._attr_device_info = _device_info(entry)
 
     @property
     def native_value(self) -> str | None:
-        value = getattr(self.coordinator, "linking_url", None)
+        data = self.coordinator.data or {}
+        value = data.get("linking_url")
         return "available" if value else None
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        value = getattr(self.coordinator, "linking_url", None)
-        return {"url": str(value)} if value else {}
+        data = self.coordinator.data or {}
+        value = data.get("linking_url")
+        return {"url": value} if value else {}
 
 
 class EkzTariffLastApiSuccessSensor(CoordinatorEntity[EkzTariffCoordinator], SensorEntity):
     _attr_has_entity_name = True
-    _attr_name = "Last API success"
-    _attr_icon = "mdi:cloud-check-outline"
     _attr_device_class = SensorDeviceClass.TIMESTAMP
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:cloud-check-outline"
 
     def __init__(self, coordinator: EkzTariffCoordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator)
+        self._attr_name = "Last API success"
         self._attr_unique_id = f"{entry.entry_id}_last_api_success"
         self._attr_device_info = _device_info(entry)
 
     @property
     def native_value(self) -> datetime | None:
-        value = getattr(self.coordinator, "last_api_success_utc", None)
-        return dt_util.as_utc(value) if isinstance(value, datetime) else None
+        data = self.coordinator.data or {}
+        value = data.get("last_api_success")
+        return value if isinstance(value, datetime) else None
