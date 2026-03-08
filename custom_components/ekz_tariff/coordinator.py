@@ -113,6 +113,7 @@ class EkzTariffCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "baseline_tariff_name": self.baseline_tariff_name,
             "link_status": self.link_status,
             "linking_url": self.linking_url,
+            "last_api_success": self.last_api_success_utc,
         }
 
     def _parse_prices(self, payload: dict[str, Any] | list[dict[str, Any]]) -> list[PriceSlot]:
