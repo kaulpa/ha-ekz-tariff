@@ -109,6 +109,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         EkzTariffPriceAllInNowSensor(coordinator, entry, "active", "price_allin_now", "Price all-in now"),
         EkzTariffTomorrowAvailableSensor(coordinator, entry),
         EkzTariffTomorrowSlotCountSensor(coordinator, entry),
+        EkzTariffTomorrowDetectedSensor(coordinator, entry),
         EkzTariffPublicationTimestampSensor(coordinator, entry, False),
         EkzTariffPublicationTimestampSensor(coordinator, entry, True),
         EkzTariffLinkStatusSensor(coordinator, entry),
@@ -263,6 +264,28 @@ class EkzTariffTomorrowSlotCountSensor(CoordinatorEntity[EkzTariffCoordinator], 
     @property
     def native_value(self) -> int:
         return len(_tomorrow_slots(_slots(self.coordinator, "active")))
+
+
+class EkzTariffTomorrowDetectedSensor(CoordinatorEntity[EkzTariffCoordinator], SensorEntity):
+    _attr_has_entity_name = True
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:calendar-clock"
+
+    def __init__(self, coordinator: EkzTariffCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator)
+        self._attr_name = "Tomorrow detected"
+        self._attr_unique_id = f"{entry.entry_id}_tomorrow_detected"
+        self._attr_device_info = _device_info(entry)
+
+    @property
+    def native_value(self) -> datetime | None:
+        tomorrow_slots = _tomorrow_slots(_slots(self.coordinator, "active"))
+        if not tomorrow_slots:
+            return None
+        data = self.coordinator.data or {}
+        value = data.get("last_api_success")
+        return value if isinstance(value, datetime) else None
 
 
 class EkzTariffPriceComponentNowSensor(CoordinatorEntity[EkzTariffCoordinator], SensorEntity):
