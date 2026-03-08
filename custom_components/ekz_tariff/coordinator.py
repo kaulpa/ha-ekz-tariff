@@ -31,6 +31,7 @@ class PriceSlot:
     start: datetime
     electricity_chf_per_kwh: float
     components_chf_per_kwh: dict[str, float]
+    components_chf_per_month: dict[str, float]
 
 
 class EkzTariffCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -130,6 +131,7 @@ class EkzTariffCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if dt_start is None:
                 continue
             comps = EkzTariffApi.parse_components_chf_per_kwh(item)
+            monthly_comps = EkzTariffApi.parse_components_chf_per_month(item)
             elec = float(comps.get("electricity", 0.0) or 0.0)
             if elec <= 0 and isinstance(comps.get("integrated"), (int, float)):
                 elec = float(comps.get("integrated") or 0.0)
@@ -140,6 +142,7 @@ class EkzTariffCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     start=dt_util.as_utc(dt_start),
                     electricity_chf_per_kwh=elec,
                     components_chf_per_kwh=comps,
+                    components_chf_per_month=monthly_comps,
                 )
             )
         out = {s.start: s for s in sorted(slots, key=lambda s: s.start)}

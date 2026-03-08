@@ -25,6 +25,7 @@ class EkzTariffAuthError(EkzTariffApiError):
 class EkzTariffApi:
     BASE_URL: Final[str] = "https://api.tariffs.ekz.ch/v1"
     CHF_PER_KWH_UNITS: Final[set[str]] = {"CHF_kWh", "CHF/kWh"}
+    CHF_PER_MONTH_UNITS: Final[set[str]] = {"CHF_m", "CHF/month", "CHF_month"}
     IGNORED_COMPONENT_KEYS: Final[set[str]] = {"feed_in", "refund_storage"}
 
     def __init__(self, session: aiohttp.ClientSession, oauth_session: OAuth2Session | None = None) -> None:
@@ -151,7 +152,7 @@ class EkzTariffApi:
         raise EkzTariffApiError(f"Unexpected customerTariffs payload: {data!r}")
 
     @classmethod
-    def _sum_list_unit(cls, val: Any) -> float | None:
+    def _sum_list_unit(cls, val: Any, allowed_units: set[str]) -> float | None:
         if not isinstance(val, list):
             return None
         total = 0.0
@@ -160,7 +161,7 @@ class EkzTariffApi:
             if not isinstance(entry, dict):
                 continue
             unit = entry.get("unit")
-            if not isinstance(unit, str) or unit not in cls.CHF_PER_KWH_UNITS:
+            if not isinstance(unit, str) or unit not in allowed_units:
                 continue
             v = entry.get("value")
             if isinstance(v, (int, float)):
@@ -177,7 +178,7 @@ class EkzTariffApi:
             if key in cls.IGNORED_COMPONENT_KEYS:
                 continue
 
-            s = cls._sum_list_unit(val)
+            s = cls._sum_list_unit(val, cls.CHF_PER_KWH_UNITS)
             if isinstance(s, (int, float)) and s != 0.0:
                 out[str(key)] = float(s)
                 continue
@@ -185,6 +186,33 @@ class EkzTariffApi:
             if isinstance(val, dict):
                 unit = val.get("unit")
                 if isinstance(unit, str) and unit in cls.CHF_PER_KWH_UNITS:
+                    v = val.get("value")
+                    if isinstance(v, (int, float)) and float(v) != 0.0:
+                        out[str(key)] = float(v)
+                        continue
+
+            if isinstance(val, (int, float)) and float(val) != 0.0:
+                out[str(key)] = float(val)
+
+        return out
+
+    @classmethod
+    def parse_components_chf_per_month(cls, price_item: dict[str, Any]) -> dict[str, float]:
+        out: dict[str, float] = {}
+        for key, val in price_item.items():
+            if key in ("start_timestamp", "end_timestamp", "publication_timestamp"):
+                continue
+            if key in cls.IGNORED_COMPONENT_KEYS:
+                continue
+
+            s = cls._sum_list_unit(val, cls.CHF_PER_MONTH_UNITS)
+            if isinstance(s, (int, float)) and s != 0.0:
+                out[str(key)] = float(s)
+                continue
+
+            if isinstance(val, dict):
+                unit = val.get("unit")
+                if isinstance(unit, str) and unit in cls.CHF_PER_MONTH_UNITS:
                     v = val.get("value")
                     if isinstance(v, (int, float)) and float(v) != 0.0:
                         out[str(key)] = float(v)

@@ -221,7 +221,6 @@ class EkzTariffPriceAllInNowSensor(CoordinatorEntity[EkzTariffCoordinator], Sens
 
 class EkzTariffPriceComponentNowSensor(CoordinatorEntity[EkzTariffCoordinator], SensorEntity):
     _attr_has_entity_name = True
-    _attr_native_unit_of_measurement = "CHF/kWh"
     _attr_icon = "mdi:currency-chf"
 
     def __init__(self, coordinator: EkzTariffCoordinator, entry: ConfigEntry, component: str, baseline: bool) -> None:
@@ -235,11 +234,18 @@ class EkzTariffPriceComponentNowSensor(CoordinatorEntity[EkzTariffCoordinator], 
         self._attr_device_info = _device_info(entry)
 
     @property
+    def native_unit_of_measurement(self) -> str:
+        return "CHF/month" if self._component == "metering" else "CHF/kWh"
+
+    @property
     def native_value(self) -> float | None:
         slot = _current_slot(_slots(self.coordinator, self._kind))
         if not slot:
             return None
-        value = (slot.components_chf_per_kwh or {}).get(self._component)
+        if self._component == "metering":
+            value = (slot.components_chf_per_month or {}).get(self._component)
+        else:
+            value = (slot.components_chf_per_kwh or {}).get(self._component)
         return float(value) if isinstance(value, (int, float)) else None
 
 
