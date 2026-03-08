@@ -16,35 +16,21 @@ from .const import DOMAIN
 from .coordinator import EkzTariffCoordinator, PriceSlot
 
 # IMPORTANT:
-# EKZ exposes an "integrated" component, but the real all-in tariff must not add
-# "integrated" on top of the other components.
-#
-# In practice EKZ may return either:
-# - a single aggregated "regional_fees" value, or
-# - itemized surcharge components (for example SDL / federal fees / reserve ...).
-#
-# Therefore the all-in calculation works like this:
-# - always include electricity + grid
-# - if itemized variable surcharge components are present, sum those
-# - otherwise fall back to aggregated regional_fees
-ALLIN_BASE_COMPONENTS: tuple[str, ...] = (
+# EKZ exposes an "integrated" component, but the real all-in tariff used in the
+# EKZ tariff sheet is electricity + grid + regional_fees.
+# Therefore "price_allin_now" must NOT sum "integrated" together with the other
+# components, otherwise the price is counted twice.
+ALLIN_COMPONENTS: tuple[str, ...] = (
     "electricity",
     "grid",
+    "regional_fees",
 )
-ALLIN_EXCLUDED_COMPONENTS: frozenset[str] = frozenset({
-    "integrated",
-    "metering",
-    "refund_storage",
-    "feed_in",
-})
 COMPONENT_KEYS: tuple[str, ...] = (
     "electricity",
     "grid",
     "regional_fees",
     "metering",
-    "refund_storage",
     "integrated",
-    "feed_in",
 )
 
 
@@ -86,40 +72,6 @@ def _next_slot(slots: list[PriceSlot]) -> PriceSlot | None:
             return slot
     return None
 
-
-
-
-def _allin_details(comps: dict[str, Any]) -> tuple[float | None, list[str], str]:
-    normalized: dict[str, float] = {
-        str(key): float(value)
-        for key, value in (comps or {}).items()
-        if isinstance(value, (int, float))
-    }
-
-    total = sum(normalized.get(key, 0.0) for key in ALLIN_BASE_COMPONENTS)
-
-    itemized_variable_keys = sorted(
-        key
-        for key, value in normalized.items()
-        if value
-        and key not in ALLIN_EXCLUDED_COMPONENTS
-        and key not in ALLIN_BASE_COMPONENTS
-        and key != "regional_fees"
-    )
-
-    if itemized_variable_keys:
-        total += sum(normalized[key] for key in itemized_variable_keys)
-        used = [*ALLIN_BASE_COMPONENTS, *itemized_variable_keys]
-        mode = "itemized_variable_components"
-    else:
-        regional_fees = normalized.get("regional_fees", 0.0)
-        total += regional_fees
-        used = [*ALLIN_BASE_COMPONENTS]
-        if regional_fees:
-            used.append("regional_fees")
-        mode = "aggregated_regional_fees"
-
-    return (round(total, 6) if total else None), used, mode
 
 def _curve_attrs(slots: list[PriceSlot], publication_timestamp: datetime | None) -> dict[str, Any]:
     if not slots:
@@ -242,8 +194,9 @@ class EkzTariffPriceAllInNowSensor(CoordinatorEntity[EkzTariffCoordinator], Sens
         slot = _current_slot(_slots(self.coordinator, self._kind))
         if not slot:
             return None
-        total, _used, _mode = _allin_details(slot.components_chf_per_kwh or {})
-        return total
+        comps = slot.components_chf_per_kwh or {}
+        total = sum(float(comps.get(c, 0.0) or 0.0) for c in ALLIN_COMPONENTS)
+        return round(total, 6) if total else None
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -251,16 +204,14 @@ class EkzTariffPriceAllInNowSensor(CoordinatorEntity[EkzTariffCoordinator], Sens
         if not slot:
             return {}
         comps = slot.components_chf_per_kwh or {}
-        total, used, mode = _allin_details(comps)
+        summed = sum(float(comps.get(c, 0.0) or 0.0) for c in ALLIN_COMPONENTS)
         api_integrated = comps.get("integrated")
         return {
             "slot_start_utc": slot.start.isoformat(),
-            "sum_components": total,
+            "sum_components": round(summed, 6),
             "api_integrated": float(api_integrated) if isinstance(api_integrated, (int, float)) else None,
-            "components_used": used,
-            "available_components": sorted(comps.keys()),
-            "calculation_mode": mode,
-            "calculation_note": "all-in excludes integrated and metering; itemized variable components are preferred over aggregated regional_fees",
+            "components_used": list(ALLIN_COMPONENTS),
+            "calculation_note": "all-in is calculated from electricity + grid + regional_fees",
         }
 
 
