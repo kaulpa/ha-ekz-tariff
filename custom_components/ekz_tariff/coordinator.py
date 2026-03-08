@@ -49,8 +49,7 @@ class EkzTariffCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.link_status: str | None = None
         self.linking_url: str | None = None
         self.last_api_success_utc: datetime | None = None
-        self._tomorrow_available: bool = False
-        super().__init__(hass, _LOGGER, name="EKZ Tariff", update_interval=None)
+        super().__init__(hass, _LOGGER, name="EKZ Tariff", update_interval=timedelta(minutes=5))
 
     async def _async_update_data(self) -> dict[str, Any]:
         today = dt_util.now().date()
@@ -89,13 +88,6 @@ class EkzTariffCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 raise UpdateFailed(f"myEKZ customerTariffs failed: {err}") from err
 
             active = self._parse_prices(active_payload)
-            local_tz = dt_util.DEFAULT_TIME_ZONE
-            tomorrow = dt_util.now().date() + timedelta(days=1)
-            tomorrow_slots = [
-                s for s in active
-                if s.start.astimezone(local_tz).date() == tomorrow
-            ]
-            self._tomorrow_available = len(tomorrow_slots) >= 96
             if not active:
                 raise UpdateFailed("myEKZ customerTariffs returned no price slots")
         else:
@@ -113,18 +105,6 @@ class EkzTariffCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         self.last_api_success_utc = dt_util.utcnow()
         self._last_fetch_date = today
-
-        now = dt_util.now()
-        if self._tomorrow_available:
-            self.update_interval = None
-        else:
-            if now.hour == 18 and 5 <= now.minute <= 30:
-                self.update_interval = timedelta(minutes=5)
-            elif now.hour >= 18 and (now.hour > 18 or now.minute > 30):
-                self.update_interval = timedelta(minutes=15)
-            else:
-                self.update_interval = None
-
         return {
             "active": active,
             "baseline": baseline,
