@@ -32,6 +32,9 @@ COMPONENT_KEYS: tuple[str, ...] = (
     "metering",
     "integrated",
 )
+BASELINE_COMPONENT_KEYS: tuple[str, ...] = (
+    "electricity",
+)
 
 
 def _device_info(entry: ConfigEntry) -> dict[str, Any]:
@@ -98,7 +101,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         EkzTariffNextPriceSensor(coordinator, entry, "active", "price_next", "Next price"),
         EkzTariffNextPriceSensor(coordinator, entry, "baseline", "baseline_price_next", "Baseline next price"),
         EkzTariffPriceAllInNowSensor(coordinator, entry, "active", "price_allin_now", "Price all-in now"),
-        EkzTariffPriceAllInNowSensor(coordinator, entry, "baseline", "baseline_price_allin_now", "Baseline price all-in now"),
         EkzTariffPublicationTimestampSensor(coordinator, entry, False),
         EkzTariffPublicationTimestampSensor(coordinator, entry, True),
         EkzTariffLinkStatusSensor(coordinator, entry),
@@ -108,6 +110,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 
     for component in COMPONENT_KEYS:
         entities.append(EkzTariffPriceComponentNowSensor(coordinator, entry, component, False))
+
+    for component in BASELINE_COMPONENT_KEYS:
         entities.append(EkzTariffPriceComponentNowSensor(coordinator, entry, component, True))
 
     async_add_entities(entities, update_before_add=True)
