@@ -53,8 +53,8 @@ class EkzTariffCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _async_update_data(self) -> dict[str, Any]:
         today = dt_util.now().date()
-        if self._last_fetch_date == today and self.data:
-            return self.data
+        # Removed daily fetch lock so tariffs can be refetched later the same day
+        # (needed to pick up tomorrow prices when EKZ publishes them in the evening)
 
         if not self.ems_instance_id or not self.redirect_uri:
             raise UpdateFailed("EKZ Tariff requires ems_instance_id and redirect_uri.")
