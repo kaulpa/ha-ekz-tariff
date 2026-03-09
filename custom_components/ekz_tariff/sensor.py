@@ -115,6 +115,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         EkzTariffLinkStatusSensor(coordinator, entry),
         EkzTariffLinkingUrlSensor(coordinator, entry),
         EkzTariffLastApiSuccessSensor(coordinator, entry),
+        EkzTariffNationalFeeNowSensor(coordinator, entry, "national_fees_onlySDL"),
+        EkzTariffNationalFeeNowSensor(coordinator, entry, "national_fees_onlyStromreserve"),
+        EkzTariffNationalFeeNowSensor(coordinator, entry, "national_fees_onlySolidarisierteKosten"),
+        EkzTariffNationalFeeNowSensor(coordinator, entry, "national_fees_onlyBundesabgaben"),
     ]
 
     for component in COMPONENT_KEYS:
@@ -381,6 +385,35 @@ class EkzTariffLinkingUrlSensor(CoordinatorEntity[EkzTariffCoordinator], SensorE
         data = self.coordinator.data or {}
         value = data.get("linking_url")
         return {"url": value} if value else {}
+
+
+
+class EkzTariffNationalFeeNowSensor(CoordinatorEntity[EkzTariffCoordinator], SensorEntity):
+    _attr_has_entity_name = True
+    _attr_native_unit_of_measurement = "CHF/kWh"
+    _attr_icon = "mdi:currency-chf"
+
+    def __init__(self, coordinator: EkzTariffCoordinator, entry: ConfigEntry, key: str) -> None:
+        super().__init__(coordinator)
+        self._key = key
+        self._attr_name = f"{key} now"
+        self._attr_unique_id = f"{entry.entry_id}_{key}_now"
+        self._attr_device_info = _device_info(entry)
+
+    @property
+    def native_value(self) -> float | None:
+        data = self.coordinator.data or {}
+        fees = data.get("national_fees", {})
+        slots = fees.get(self._key) if isinstance(fees, dict) else None
+        if not slots:
+            return None
+        slot = _current_slot(slots)
+        if not slot:
+            return None
+        comps = slot.components_chf_per_kwh or {}
+        if not comps:
+            return None
+        return float(next(iter(comps.values())))
 
 
 class EkzTariffLastApiSuccessSensor(CoordinatorEntity[EkzTariffCoordinator], SensorEntity):

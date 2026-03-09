@@ -93,6 +93,21 @@ class EkzTariffCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         else:
             _LOGGER.info("Skipping customerTariffs because EMS link is not active: %s", self.link_status)
 
+        
+national_fees: dict[str, list[PriceSlot]] = {}
+for name in (
+    "national_fees_onlySDL",
+    "national_fees_onlyStromreserve",
+    "national_fees_onlySolidarisierteKosten",
+    "national_fees_onlyBundesabgaben",
+):
+    try:
+        payload = await self.api.fetch_public_tariff(name)
+        national_fees[name] = self._parse_prices(payload)
+    except Exception as err:
+        _LOGGER.warning("Failed to fetch national fee '%s': %s", name, err)
+        national_fees[name] = []
+
         baseline_payload: dict[str, Any] | None = None
         baseline: list[PriceSlot] = []
         try:
@@ -114,6 +129,7 @@ class EkzTariffCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "link_status": self.link_status,
             "linking_url": self.linking_url,
             "last_api_success": self.last_api_success_utc,
+            "national_fees": national_fees,
         }
 
     def _parse_prices(self, payload: dict[str, Any] | list[dict[str, Any]]) -> list[PriceSlot]:
