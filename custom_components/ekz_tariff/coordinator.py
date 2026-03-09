@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from typing import Any
 
 from homeassistant.core import HomeAssistant
@@ -49,7 +49,7 @@ class EkzTariffCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.link_status: str | None = None
         self.linking_url: str | None = None
         self.last_api_success_utc: datetime | None = None
-        super().__init__(hass, _LOGGER, name="EKZ Tariff", update_interval=timedelta(minutes=5))
+        super().__init__(hass, _LOGGER, name="EKZ Tariff", update_interval=None)
 
     async def _async_update_data(self) -> dict[str, Any]:
         today = dt_util.now().date()
@@ -93,20 +93,6 @@ class EkzTariffCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         else:
             _LOGGER.info("Skipping customerTariffs because EMS link is not active: %s", self.link_status)
 
-        national_fees: dict[str, list[PriceSlot]] = {}
-        for name in (
-            "national_fees_onlySDL",
-            "national_fees_onlyStromreserve",
-            "national_fees_onlySolidarisierteKosten",
-            "national_fees_onlyBundesabgaben",
-        ):
-            try:
-                payload = await self.api.fetch_public_tariff(name)
-                national_fees[name] = self._parse_prices(payload)
-            except Exception as err:
-                _LOGGER.warning("Failed to fetch national fee '%s': %s", name, err)
-                national_fees[name] = []
-
         baseline_payload: dict[str, Any] | None = None
         baseline: list[PriceSlot] = []
         try:
@@ -128,7 +114,6 @@ class EkzTariffCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "link_status": self.link_status,
             "linking_url": self.linking_url,
             "last_api_success": self.last_api_success_utc,
-            "national_fees": national_fees,
         }
 
     def _parse_prices(self, payload: dict[str, Any] | list[dict[str, Any]]) -> list[PriceSlot]:
