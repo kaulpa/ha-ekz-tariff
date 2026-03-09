@@ -49,7 +49,7 @@ class EkzTariffCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.link_status: str | None = None
         self.linking_url: str | None = None
         self.last_api_success_utc: datetime | None = None
-        super().__init__(hass, _LOGGER, name="EKZ Tariff", update_interval=None)
+        super().__init__(hass, _LOGGER, name="EKZ Tariff", update_interval=timedelta(minutes=5))
 
     async def _async_update_data(self) -> dict[str, Any]:
         today = dt_util.now().date()
@@ -93,6 +93,19 @@ class EkzTariffCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         else:
             _LOGGER.info("Skipping customerTariffs because EMS link is not active: %s", self.link_status)
 
+        public_tariffs: dict[str, list[PriceSlot]] = {}
+        for name in (
+            "electricity_dynamic",
+            "grid_400D_inclFees",
+            "regional_fees_lt500MWh_ZH",
+        ):
+            try:
+                payload = await self.api.fetch_public_tariff(name)
+                public_tariffs[name] = self._parse_prices(payload)
+            except Exception as err:
+                _LOGGER.warning("Failed to fetch public tariff '%s': %s", name, err)
+                public_tariffs[name] = []
+
         baseline_payload: dict[str, Any] | None = None
         baseline: list[PriceSlot] = []
         try:
@@ -114,6 +127,7 @@ class EkzTariffCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "link_status": self.link_status,
             "linking_url": self.linking_url,
             "last_api_success": self.last_api_success_utc,
+            "public_tariffs": public_tariffs,
         }
 
     def _parse_prices(self, payload: dict[str, Any] | list[dict[str, Any]]) -> list[PriceSlot]:
