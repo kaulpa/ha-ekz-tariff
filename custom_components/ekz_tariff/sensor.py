@@ -330,10 +330,19 @@ class EkzTariffPublicTariffNowSensor(CoordinatorEntity[EkzTariffCoordinator], Se
         self._attr_unique_id = f"{entry.entry_id}_{key}_now"
         self._attr_device_info = _device_info(entry)
 
+    def _component_key(self) -> str:
+        if self._key == "electricity_dynamic":
+            return "electricity"
+        if self._key == "grid_400D_inclFees":
+            return "grid"
+        if self._key == "regional_fees_lt500MWh_ZH":
+            return "regional_fees"
+        return ""
+
     @property
     def native_value(self) -> float | None:
         data = self.coordinator.data or {}
-        tariff_map = data.get("national_fees", {})
+        tariff_map = data.get("public_tariffs", {})
         slots = tariff_map.get(self._key) if isinstance(tariff_map, dict) else None
         if not isinstance(slots, list) or not slots:
             return None
@@ -341,10 +350,7 @@ class EkzTariffPublicTariffNowSensor(CoordinatorEntity[EkzTariffCoordinator], Se
         if not slot:
             return None
         comps = slot.components_chf_per_kwh or {}
-        if self._key == "electricity_dynamic":
-            value = comps.get("electricity")
-        else:
-            value = next(iter(comps.values()), None)
+        value = comps.get(self._component_key())
         return float(value) if isinstance(value, (int, float)) else None
 
 
@@ -359,10 +365,20 @@ class EkzTariffEkzAllInNowSensor(CoordinatorEntity[EkzTariffCoordinator], Sensor
         self._attr_unique_id = f"{entry.entry_id}_ekz_all_in_now"
         self._attr_device_info = _device_info(entry)
 
+    @staticmethod
+    def _component_key(tariff_key: str) -> str:
+        if tariff_key == "electricity_dynamic":
+            return "electricity"
+        if tariff_key == "grid_400D_inclFees":
+            return "grid"
+        if tariff_key == "regional_fees_lt500MWh_ZH":
+            return "regional_fees"
+        return ""
+
     @property
     def native_value(self) -> float | None:
         data = self.coordinator.data or {}
-        tariff_map = data.get("national_fees", {})
+        tariff_map = data.get("public_tariffs", {})
         total = 0.0
         found = False
         for key in ("electricity_dynamic", "grid_400D_inclFees", "regional_fees_lt500MWh_ZH"):
@@ -373,7 +389,7 @@ class EkzTariffEkzAllInNowSensor(CoordinatorEntity[EkzTariffCoordinator], Sensor
             if not slot:
                 continue
             comps = slot.components_chf_per_kwh or {}
-            value = comps.get("electricity") if key == "electricity_dynamic" else next(iter(comps.values()), None)
+            value = comps.get(self._component_key(key))
             if isinstance(value, (int, float)):
                 total += float(value)
                 found = True
@@ -382,13 +398,13 @@ class EkzTariffEkzAllInNowSensor(CoordinatorEntity[EkzTariffCoordinator], Sensor
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         data = self.coordinator.data or {}
-        tariff_map = data.get("national_fees", {})
+        tariff_map = data.get("public_tariffs", {})
         attrs: dict[str, Any] = {}
         for key in ("electricity_dynamic", "grid_400D_inclFees", "regional_fees_lt500MWh_ZH"):
             slots = tariff_map.get(key) if isinstance(tariff_map, dict) else None
             slot = _current_slot(slots) if isinstance(slots, list) and slots else None
             comps = slot.components_chf_per_kwh if slot else {}
-            value = comps.get("electricity") if key == "electricity_dynamic" else next(iter(comps.values()), None)
+            value = comps.get(self._component_key(key))
             attrs[key] = float(value) if isinstance(value, (int, float)) else None
         return attrs
 
