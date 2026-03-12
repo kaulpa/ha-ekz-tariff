@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_entry_oauth2_flow
+from homeassistant.helpers.config_entry_oauth2_flow import async_get_config_entry_implementation
 
 from .const import DOMAIN
 
@@ -33,13 +34,4 @@ class OAuth2FlowHandler(config_entry_oauth2_flow.AbstractOAuth2FlowHandler, doma
 
 
 async def async_get_auth_implementation(hass):
-    redirect_uri = _external_callback(hass)
-    return config_entry_oauth2_flow.LocalOAuth2Implementation(
-        hass,
-        DOMAIN,
-        client_id=None,
-        client_secret=None,
-        authorize_url=AUTHORIZATION_URL,
-        token_url=TOKEN_URL,
-        redirect_uri=redirect_uri,
-    )
+    return await async_get_config_entry_implementation(hass, DOMAIN)

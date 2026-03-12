@@ -137,7 +137,7 @@ class ConfigFlow(config_entry_oauth2_flow.AbstractOAuth2FlowHandler, domain=DOMA
                     CONF_BASELINE_TARIFF_NAME: self._baseline_tariff_name or entry.data.get(CONF_BASELINE_TARIFF_NAME, DEFAULT_BASELINE_TARIFF_NAME),
                     CONF_PUBLISH_TIME: self._publish_time or entry.data.get(CONF_PUBLISH_TIME, DEFAULT_PUBLISH_TIME),
                     "ems_instance_id": self._ems_instance_id or entry.data.get("ems_instance_id"),
-                    "auth_implementation": entry.data.get("auth_implementation") or auth_impl,
+                    "auth_implementation": auth_impl or entry.data.get("auth_implementation") or DOMAIN,
                 }
                 if token is not None:
                     updates["token"] = token
@@ -149,7 +149,7 @@ class ConfigFlow(config_entry_oauth2_flow.AbstractOAuth2FlowHandler, domain=DOMA
             CONF_BASELINE_TARIFF_NAME: self._baseline_tariff_name,
             CONF_PUBLISH_TIME: self._publish_time,
             "ems_instance_id": self._ems_instance_id,
-            "auth_implementation": auth_impl,
+            "auth_implementation": auth_impl or DOMAIN,
         }
         if token is not None:
             entry_data["token"] = token
