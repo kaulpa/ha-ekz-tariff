@@ -69,6 +69,9 @@ class EkzTariffCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Debug mode
         self.debug_mode: bool = bool(config.get(CONF_DEBUG_MODE, False))
 
+        # Callback after successful fetch + merge (set by __init__.py)
+        self.on_new_tomorrow_data = None  # async callable(tomorrow_date)
+
         self._store = Store(hass, STORAGE_VERSION, f"{STORAGE_KEY}.{config.get('entry_id', 'default')}")
         self._stored_slots: dict[str, dict[str, float]] = {}
         self._publication_timestamp: datetime | None = None
@@ -219,6 +222,10 @@ class EkzTariffCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         self.log_activity("📡", f"{len(new_slots)} Tomorrow-Slots abgerufen (total: {len(self._stored_slots)})")
         _LOGGER.info("EKZ: Fetched %d tomorrow slots, total stored: %d", len(new_slots), len(self._stored_slots))
+
+        # Validate and signal — runs synchronously after data is merged
+        if self.on_new_tomorrow_data is not None:
+            await self.on_new_tomorrow_data(tomorrow)
 
         return self._build_data()
 

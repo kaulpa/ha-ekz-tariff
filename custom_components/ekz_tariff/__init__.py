@@ -10,7 +10,6 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant
 from homeassistant.helpers import config_entry_oauth2_flow, entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import async_call_later, async_track_time_change, async_track_time_interval
 from homeassistant.util import dt as dt_util
 
@@ -33,7 +32,6 @@ from .const import (
     DEFAULT_RETRY_INTERVAL_MINUTES,
     DOMAIN,
     PLATFORMS,
-    SIGNAL_EKZ_NEW_DATA,
 )
 from .coordinator import EkzTariffCoordinator
 from .validator import validate_tomorrow_slots
@@ -134,6 +132,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = EkzTariffCoordinator(hass, api, config=config)
     hass.data[DOMAIN][entry.entry_id] = coordinator
 
+    # Set the validation callback — runs inside _async_update_data after slots are merged
+    coordinator.on_new_tomorrow_data = lambda target_date: _check_and_validate(target_date)
+
     # Load persisted data from storage (no API call)
     await coordinator.async_load_storage()
 
@@ -233,7 +234,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             "EKZ: Tomorrow data validated for %s (%d slots), signaling tariff_saver",
             target_date, result.slot_count,
         )
-        async_dispatcher_send(hass, SIGNAL_EKZ_NEW_DATA, {
+        hass.bus.async_fire("ekz_tariff_new_data", {
             "date": str(target_date),
             "entry_id": entry.entry_id,
         })
@@ -251,8 +252,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             await coordinator.async_refresh()
         except Exception:
             pass
-        tomorrow = (dt_util.now() + timedelta(days=1)).date()
-        await _check_and_validate(tomorrow)
+        # Validation runs inside _async_update_data via on_new_tomorrow_data callback
 
     async def _retry_callback(_now) -> None:
         """Retry fetch after failed validation."""
@@ -262,8 +262,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             await coordinator.async_refresh()
         except Exception:
             pass
-        tomorrow = (dt_util.now() + timedelta(days=1)).date()
-        await _check_and_validate(tomorrow)
+        # Validation runs inside _async_update_data via on_new_tomorrow_data callback
 
     async def _proactive_token_refresh(_now) -> None:
         """Keep OAuth token alive."""
@@ -335,19 +334,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         retry_state["no_data_count"] = 0
         retry_state["invalid_data_count"] = 0
         coordinator.reset_error_flags()
-
-        async def _do_refresh_and_validate():
-            try:
-                await coordinator.async_refresh()
-            except Exception as err:
-                coordinator.log_activity("💥", f"Refresh Fehler: {err}")
-            tomorrow = (dt_util.now() + timedelta(days=1)).date()
-            await _check_and_validate(tomorrow)
-
-        hass.async_create_task(_do_refresh_and_validate())
+        try:
+            await coordinator.async_refresh()
+        except Exception as err:
+            coordinator.log_activity("💥", f"Refresh Fehler: {err}")
+        # Validation runs inside _async_update_data via on_new_tomorrow_data callback
 
     hass.services.async_register(DOMAIN, "force_refresh", _force_refresh_service)
 
+    # Test service to send dispatcher signal directly
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     # One-time cleanup: remove orphaned entities from previous code versions
