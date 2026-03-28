@@ -3,11 +3,10 @@
     "step": {
       "user": {
         "title": "EKZ Tariff einrichten",
-        "description": "Konfiguriere die rohe EKZ-Tarif-Integration.",
+        "description": "Konfiguriere die EKZ-Tarif-Integration.",
         "data": {
           "name": "Name",
           "redirect_uri": "EKZ-Linking-Redirect-URI",
-          "baseline_tariff_name": "\u00d6ffentlicher Baseline-Tarifname",
           "publish_time": "Publikationszeit (HH:MM)"
         }
       },
@@ -18,5 +17,21 @@
     },
     "error": {},
     "abort": {}
+  },
+  "options": {
+    "step": {
+      "init": {
+        "data": {
+          "publish_time": "Publikationszeit (HH:MM)",
+          "min_slots_per_day": "Min. Slots pro Tag (Standard: 96)",
+          "min_price_chf_per_kwh": "Min. Preis CHF/kWh",
+          "max_price_chf_per_kwh": "Max. Preis CHF/kWh",
+          "max_retries_no_data": "Max. Versuche bei fehlenden Daten",
+          "max_retries_invalid_data": "Max. Versuche bei ungültigen Daten",
+          "retry_interval_minutes": "Retry-Intervall (Minuten)",
+          "debug_mode": "Debug Modus"
+        }
+      }
+    }
   }
 }

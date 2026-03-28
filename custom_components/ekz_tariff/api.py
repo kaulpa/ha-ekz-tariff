@@ -5,6 +5,7 @@ import logging
 from datetime import datetime
 from typing import Any, Final
 
+import asyncio
 import aiohttp
 from aiohttp import ClientError
 
@@ -58,6 +59,14 @@ class EkzTariffApi:
             raise ValueError(f"Unexpected EKZ public payload shape, missing 'prices': {payload!r}")
         return payload
 
+    # Keycloak error strings that indicate the refresh token is genuinely invalid
+    _AUTH_ERROR_KEYWORDS: frozenset = frozenset({
+        "invalid_grant",
+        "session_not_active",
+        "token_expired",
+        "token is not active",
+    })
+
     async def _async_get_access_token(self) -> str:
         if not self._oauth_session:
             raise EkzTariffAuthError("No OAuth session available (myEKZ not configured)")
@@ -65,15 +74,32 @@ class EkzTariffApi:
             await self._oauth_session.async_ensure_token_valid()
         except ConfigEntryAuthFailed:
             raise
+        except aiohttp.ClientResponseError as err:
+            # 400/401 from token endpoint may be a real auth error
+            if err.status in (400, 401):
+                _LOGGER.warning("EKZ token refresh HTTP %s – reauthentication required", err.status)
+                raise ConfigEntryAuthFailed(f"EKZ token refresh HTTP {err.status}") from err
+            # 5xx or other HTTP errors are transient – coordinator will retry
+            _LOGGER.warning("EKZ token refresh transient HTTP %s (will retry)", err.status)
+            raise EkzTariffApiError(f"EKZ token refresh transient failure: {err}") from err
+        except (aiohttp.ClientError, asyncio.TimeoutError) as err:
+            # Network / timeout errors are never auth failures
+            _LOGGER.warning("EKZ token refresh network error (will retry): %s", err)
+            raise EkzTariffApiError(f"EKZ token refresh network error: {err}") from err
         except Exception as err:
-            msg = str(err)
-            _LOGGER.warning("EKZ OAuth refresh failed; reauthentication required: %s", msg)
-            raise ConfigEntryAuthFailed(f"EKZ OAuth refresh failed: {msg}") from err
+            msg = str(err).lower()
+            if any(kw in msg for kw in self._AUTH_ERROR_KEYWORDS):
+                _LOGGER.warning("EKZ token genuinely invalid – reauthentication required: %s", err)
+                raise ConfigEntryAuthFailed(f"EKZ token invalid: {err}") from err
+            # Unknown error – treat as transient to avoid false re-auth notifications
+            _LOGGER.warning("EKZ token refresh unexpected error (treating as transient): %s", err)
+            raise EkzTariffApiError(f"EKZ token refresh failed: {err}") from err
 
         token = self._oauth_session.token or {}
         access_token = token.get("access_token")
         if not access_token:
             raise ConfigEntryAuthFailed("EKZ OAuth token missing access_token")
+        _LOGGER.debug("EKZ access token OK, expires_in=%s", token.get("expires_in"))
         return access_token
 
     async def fetch_ems_link_status(self, *, ems_instance_id: str, redirect_uri: str) -> dict[str, Any]:
