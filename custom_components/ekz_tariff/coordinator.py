@@ -111,6 +111,10 @@ class EkzTariffCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if isinstance(baseline, (int, float)):
             self.baseline_chf_per_kwh = float(baseline)
         self.baseline_quarter = stored.get("baseline_quarter")
+        # Restore activity log from storage
+        saved_log = stored.get("activity_log")
+        if isinstance(saved_log, list):
+            self.activity_log = saved_log[:30]
         _LOGGER.info("EKZ: Loaded %d slots from storage (baseline: %s for %s)",
                       len(self._stored_slots), self.baseline_chf_per_kwh, self.baseline_quarter)
         self.log_activity("💾", f"{len(self._stored_slots)} Slots aus Storage geladen")
@@ -127,6 +131,7 @@ class EkzTariffCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "link_status": self.link_status,
             "baseline_chf_per_kwh": self.baseline_chf_per_kwh,
             "baseline_quarter": self.baseline_quarter,
+            "activity_log": self.activity_log[:30],
         })
 
     # -- Fetch --
