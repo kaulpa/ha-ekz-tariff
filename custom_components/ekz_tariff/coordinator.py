@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, time as _time
+from datetime import date, datetime, timedelta, time as _time
 from typing import Any
 
 from homeassistant.core import HomeAssistant
@@ -62,6 +62,9 @@ class EkzTariffCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.auth_error: bool = False
         self.baseline_error: bool = False
 
+        # Per-date validation status (persisted)
+        self.date_validity: dict[str, dict[str, Any]] = {}
+
         # Baseline (netto, computed from API)
         self.baseline_chf_per_kwh: float | None = None
         self.baseline_quarter: str | None = None
@@ -71,6 +74,7 @@ class EkzTariffCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         # Callback after successful fetch + merge (set by __init__.py)
         self.on_new_tomorrow_data = None  # async callable(tomorrow_date)
+        # _pending_signal removed — bus event is now fired directly in validation callback
 
         self._store = Store(hass, STORAGE_VERSION, f"{STORAGE_KEY}.{config.get('entry_id', 'default')}")
         self._stored_slots: dict[str, dict[str, float]] = {}
@@ -84,11 +88,117 @@ class EkzTariffCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.activity_log = self.activity_log[:30]
 
     def reset_error_flags(self) -> None:
-        """Reset all error flags (called at start of daily refresh)."""
+        """Reset all error flags (called after successful validation)."""
         self.no_data_error = False
         self.invalid_data_error = False
         self.auth_error = False
         self.baseline_error = False
+
+    def set_date_validity(
+        self,
+        target_date: date,
+        *,
+        valid: bool,
+        slot_count: int = 0,
+        expected_slots: int = 0,
+        error: str | None = None,
+        details: str | None = None,
+        retry_count: int = 0,
+    ) -> None:
+        """Set validation result for a specific date."""
+        self.date_validity[target_date.isoformat()] = {
+            "valid": valid,
+            "slot_count": slot_count,
+            "expected_slots": expected_slots,
+            "error": error,
+            "details": details,
+            "retry_count": retry_count,
+            "validated_at": dt_util.utcnow().isoformat(),
+        }
+
+    def get_date_validity(self, target_date: date) -> dict[str, Any] | None:
+        """Get validation result for a specific date."""
+        return self.date_validity.get(target_date.isoformat())
+
+    def cleanup_old_validity(self) -> None:
+        """Remove validity entries older than 3 days."""
+        cutoff = (dt_util.now().date() - timedelta(days=3)).isoformat()
+        to_remove = [d for d in self.date_validity if d < cutoff]
+        for d in to_remove:
+            del self.date_validity[d]
+
+    def restore_error_flags_from_validity(self) -> None:
+        """Derive boolean error flags from persisted date_validity."""
+        today = dt_util.now().date()
+        tomorrow = today + timedelta(days=1)
+        for d in (today, tomorrow):
+            val = self.date_validity.get(d.isoformat())
+            if not isinstance(val, dict) or val.get("valid", True):
+                continue
+            err = val.get("error")
+            if err == "no_data":
+                self.no_data_error = True
+            elif err in ("insufficient_slots", "gap_detected", "price_out_of_range"):
+                self.invalid_data_error = True
+            elif err == "baseline_failed":
+                self.baseline_error = True
+
+    def _validate_on_startup(self) -> None:
+        """Validate stored slots for today/tomorrow on startup if no date_validity exists."""
+        from .validator import validate_tomorrow_slots
+        from .const import (
+            DEFAULT_MIN_PRICE_CHF_PER_KWH,
+            DEFAULT_MAX_PRICE_CHF_PER_KWH,
+            DEFAULT_MIN_SLOTS_PER_DAY,
+        )
+
+        tz = dt_util.get_time_zone(self.hass.config.time_zone)
+        if tz is None:
+            return
+
+        min_slots = int(self.config.get("min_slots_per_day", DEFAULT_MIN_SLOTS_PER_DAY))
+        min_price = float(self.config.get("min_price_chf_per_kwh", DEFAULT_MIN_PRICE_CHF_PER_KWH))
+        max_price = float(self.config.get("max_price_chf_per_kwh", DEFAULT_MAX_PRICE_CHF_PER_KWH))
+
+        today = dt_util.now().date()
+        tomorrow = today + timedelta(days=1)
+
+        for target_date in (today, tomorrow):
+            date_str = target_date.isoformat()
+            if date_str in self.date_validity:
+                continue  # Already have a record, don't overwrite
+
+            # Check if we have any slots for this date
+            has_slots = False
+            for ts_key in self._stored_slots:
+                parsed = dt_util.parse_datetime(ts_key)
+                if parsed and dt_util.as_local(parsed).date() == target_date:
+                    has_slots = True
+                    break
+
+            if not has_slots:
+                continue  # No data at all — nothing to validate
+
+            result = validate_tomorrow_slots(
+                stored_slots=self._stored_slots,
+                target_date=target_date,
+                tz=tz,
+                min_slots=min_slots,
+                min_price=min_price,
+                max_price=max_price,
+            )
+            self.set_date_validity(
+                target_date,
+                valid=result.valid,
+                slot_count=result.slot_count,
+                expected_slots=result.expected_slots,
+                error=result.error,
+                details=result.details,
+            )
+            _LOGGER.info(
+                "EKZ: Startup validation for %s: valid=%s (%d/%d slots)",
+                target_date, result.valid, result.slot_count, result.expected_slots,
+            )
 
     # -- Storage --
 
@@ -115,6 +225,13 @@ class EkzTariffCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         saved_log = stored.get("activity_log")
         if isinstance(saved_log, list):
             self.activity_log = saved_log[:30]
+        # Restore date validity from storage
+        saved_validity = stored.get("date_validity")
+        if isinstance(saved_validity, dict):
+            self.date_validity = saved_validity
+        # Validate today/tomorrow on startup if no date_validity record exists
+        self._validate_on_startup()
+        self.restore_error_flags_from_validity()
         _LOGGER.info("EKZ: Loaded %d slots from storage (baseline: %s for %s)",
                       len(self._stored_slots), self.baseline_chf_per_kwh, self.baseline_quarter)
         self.log_activity("💾", f"{len(self._stored_slots)} Slots aus Storage geladen")
@@ -132,6 +249,7 @@ class EkzTariffCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "baseline_chf_per_kwh": self.baseline_chf_per_kwh,
             "baseline_quarter": self.baseline_quarter,
             "activity_log": self.activity_log[:30],
+            "date_validity": self.date_validity,
         })
 
     # -- Fetch --
@@ -228,7 +346,8 @@ class EkzTariffCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.log_activity("📡", f"{len(new_slots)} Tomorrow-Slots abgerufen (total: {len(self._stored_slots)})")
         _LOGGER.info("EKZ: Fetched %d tomorrow slots, total stored: %d", len(new_slots), len(self._stored_slots))
 
-        # Validate and signal — runs synchronously after data is merged
+        # Validate — runs synchronously after data is merged
+        # Bus event is fired directly inside the validation callback (no more _pending_signal)
         if self.on_new_tomorrow_data is not None:
             await self.on_new_tomorrow_data(tomorrow)
 
@@ -387,6 +506,7 @@ class EkzTariffCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "publication_timestamp": self._publication_timestamp,
             "last_api_success": self.last_api_success_utc,
             "link_status": self.link_status,
+            "date_validity": self.date_validity,
         }
 
     # -- Cleanup --
@@ -402,6 +522,7 @@ class EkzTariffCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             del self._stored_slots[ts]
         if to_remove:
             _LOGGER.debug("EKZ: Cleaned up %d old slots", len(to_remove))
+        self.cleanup_old_validity()
 
     # -- Helpers --
 

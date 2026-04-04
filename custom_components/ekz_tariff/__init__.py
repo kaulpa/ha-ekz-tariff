@@ -84,6 +84,7 @@ def get_provider_data(hass: HomeAssistant, entry_id: str) -> dict[str, Any]:
         "active_publication_timestamp": data.get("publication_timestamp"),
         "link_status": data.get("link_status"),
         "last_api_success_utc": coordinator.last_api_success_utc,
+        "date_validity": coordinator.date_validity,
     }
 
 
@@ -181,9 +182,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             coordinator.log_activity("⚠️", f"Keine Slots für {target_date} (Versuch {count}/{max_retries_no_data})")
             if count >= max_retries_no_data:
                 coordinator.no_data_error = True
+                coordinator.set_date_validity(
+                    target_date, valid=False, error="no_data",
+                    details=f"Keine Daten nach {count} Versuchen",
+                    retry_count=count,
+                )
+                await coordinator._async_save_storage()
                 coordinator.log_activity("❌", f"Keine Daten nach {count} Versuchen")
                 _LOGGER.error("EKZ: No data for %s after %d retries", target_date, count)
                 coordinator.async_set_updated_data(coordinator.data)
+                await hass.services.async_call("notify", "mobile_app_iphone_17_ul", {
+                    "title": "⚠️ EKZ Tariff: Keine Daten!",
+                    "message": f"Keine Tarifdaten für {target_date.strftime('%d.%m.%Y')} nach {count} Versuchen. Planung für morgen nicht möglich!",
+                    "data": {"push": {"sound": {"name": "default", "critical": 1, "volume": 1.0}}},
+                })
                 return
             # Schedule retry
             retry_state["pending_cancel"] = async_call_later(hass, retry_interval_sec, _retry_callback)
@@ -207,9 +219,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             )
             if count >= max_retries_invalid:
                 coordinator.invalid_data_error = True
+                coordinator.set_date_validity(
+                    target_date, valid=False,
+                    slot_count=result.slot_count, expected_slots=result.expected_slots,
+                    error=result.error, details=result.details,
+                    retry_count=count,
+                )
+                await coordinator._async_save_storage()
                 coordinator.log_activity("❌", f"Ungültige Daten nach {count} Versuchen: {result.details}")
                 _LOGGER.error("EKZ: Invalid data for %s after %d retries: %s", target_date, count, result.details)
                 coordinator.async_set_updated_data(coordinator.data)
+                await hass.services.async_call("notify", "mobile_app_iphone_17_ul", {
+                    "title": "⚠️ EKZ Tariff: Ungültige Daten!",
+                    "message": f"Tarifdaten für {target_date.strftime('%d.%m.%Y')} ungültig: {result.details}. Planung für morgen nicht möglich!",
+                    "data": {"push": {"sound": {"name": "default", "critical": 1, "volume": 1.0}}},
+                })
                 return
             # Schedule retry
             retry_state["pending_cancel"] = async_call_later(hass, retry_interval_sec, _retry_callback)
@@ -219,6 +243,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         baseline_ok = await coordinator.async_compute_baseline()
         if not baseline_ok:
             coordinator.baseline_error = True
+            coordinator.set_date_validity(
+                target_date, valid=False,
+                slot_count=result.slot_count, expected_slots=result.expected_slots,
+                error="baseline_failed",
+                details="Baseline-Berechnung fehlgeschlagen",
+            )
+            await coordinator._async_save_storage()
             coordinator.log_activity("❌", "Baseline-Berechnung fehlgeschlagen")
             _LOGGER.error("EKZ: Baseline computation failed")
             coordinator.async_set_updated_data(coordinator.data)
@@ -226,6 +257,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         # 4. All good — reset errors and signal Tariff Saver
         coordinator.reset_error_flags()
+        coordinator.set_date_validity(
+            target_date, valid=True,
+            slot_count=result.slot_count, expected_slots=result.expected_slots,
+        )
+        await coordinator._async_save_storage()
         coordinator.async_set_updated_data(coordinator.data)
 
         date_str = target_date.strftime("%d.%m.%Y")
@@ -234,24 +270,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             "EKZ: Tomorrow data validated for %s (%d slots), signaling tariff_saver",
             target_date, result.slot_count,
         )
-        hass.bus.async_fire("ekz_tariff_new_data", {
-            "date": str(target_date),
-            "entry_id": entry.entry_id,
-        })
+        # Fire bus event directly
+        signal_data = {"date": str(target_date), "entry_id": entry.entry_id}
+        _LOGGER.info("EKZ: Firing ekz_tariff_new_data bus event: %s", signal_data)
+        hass.bus.async_fire("ekz_tariff_new_data", signal_data)
+        coordinator.log_activity("📤", f"Signal an Tariff Saver gesendet ({target_date})")
 
     async def _daily_refresh(now) -> None:
         """Triggered at publish_time — fetch tomorrow's tariffs."""
         _cancel_pending_retry()
         retry_state["no_data_count"] = 0
         retry_state["invalid_data_count"] = 0
-        coordinator.reset_error_flags()
-        coordinator.async_set_updated_data(coordinator.data)
+        # Error flags are NOT reset here — they persist from date_validity
+        # and will be set/cleared by the validation callback based on actual results
 
         coordinator.log_activity("⏰", f"Täglicher Fetch um {publish_time}")
         try:
             await coordinator.async_refresh()
-        except Exception:
-            pass
+        except Exception as err:
+            coordinator.log_activity("❌", f"Fetch fehlgeschlagen: {err}")
+            _LOGGER.error("EKZ daily refresh failed: %s", err)
         # Validation runs inside _async_update_data via on_new_tomorrow_data callback
 
     async def _retry_callback(_now) -> None:
@@ -260,8 +298,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         coordinator.log_activity("🔄", "Retry: erneuter Fetch")
         try:
             await coordinator.async_refresh()
-        except Exception:
-            pass
+        except Exception as err:
+            coordinator.log_activity("❌", f"Retry fehlgeschlagen: {err}")
+            _LOGGER.error("EKZ retry refresh failed: %s", err)
         # Validation runs inside _async_update_data via on_new_tomorrow_data callback
 
     async def _proactive_token_refresh(_now) -> None:
@@ -333,7 +372,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _cancel_pending_retry()
         retry_state["no_data_count"] = 0
         retry_state["invalid_data_count"] = 0
-        coordinator.reset_error_flags()
+        # Error flags are NOT reset here — they persist from date_validity
+        # and will be set/cleared by the validation callback based on actual results
         try:
             await coordinator.async_refresh()
         except Exception as err:
@@ -341,6 +381,141 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # Validation runs inside _async_update_data via on_new_tomorrow_data callback
 
     hass.services.async_register(DOMAIN, "force_refresh", _force_refresh_service)
+
+    # Fetch data for a specific date (recovery for missing days)
+    async def _fetch_date_service(call) -> None:
+        target_date_str = str(call.data.get("date", "")).strip()
+        if not target_date_str:
+            coordinator.log_activity("❌", "fetch_date: Kein Datum angegeben")
+            return
+        target = dt_util.parse_date(target_date_str)
+        if target is None:
+            coordinator.log_activity("❌", f"fetch_date: Ungültiges Datum '{target_date_str}'")
+            return
+
+        coordinator.log_activity("🔄", f"Manueller Fetch für {target.strftime('%d.%m.%Y')}")
+        now_local = dt_util.now()
+        day_start = dt_util.as_utc(datetime.combine(target, time(0, 0), tzinfo=now_local.tzinfo))
+        day_end = day_start + timedelta(days=1)
+
+        try:
+            payload = await api.fetch_customer_tariffs(
+                ems_instance_id=coordinator.ems_instance_id,
+                tariff_type="electricity_dynamic",
+                start_timestamp=day_start.isoformat(),
+                end_timestamp=day_end.isoformat(),
+            )
+        except Exception as err:
+            coordinator.log_activity("❌", f"fetch_date: API Fehler: {err}")
+            return
+
+        new_slots = coordinator._parse_customer_slots(payload)
+        if not new_slots:
+            # Try without date filters (API sometimes only returns data without filters)
+            coordinator.log_activity("⚠️", f"fetch_date: Keine Slots mit Datumsfilter, versuche ohne Filter")
+            try:
+                payload = await api.fetch_customer_tariffs(
+                    ems_instance_id=coordinator.ems_instance_id,
+                    tariff_type="electricity_dynamic",
+                )
+            except Exception as err:
+                coordinator.log_activity("❌", f"fetch_date: API Fehler (ohne Filter): {err}")
+                return
+            new_slots = coordinator._parse_customer_slots(payload)
+
+        if not new_slots:
+            coordinator.log_activity("⚠️", f"fetch_date: Keine Slots erhalten")
+            return
+
+        # Filter to only keep slots for target date
+        tz = dt_util.get_time_zone(hass.config.time_zone)
+        filtered = {
+            ts_key: comps for ts_key, comps in new_slots.items()
+            if (parsed := dt_util.parse_datetime(ts_key)) and dt_util.as_local(parsed).date() == target
+        }
+        coordinator.log_activity("📡", f"fetch_date: {len(filtered)} Slots für {target.strftime('%d.%m.%Y')} (von {len(new_slots)} total)")
+
+        if not filtered:
+            return
+
+        # Merge into stored slots
+        for ts_key, components in filtered.items():
+            coordinator._stored_slots[ts_key] = components
+        coordinator._cleanup_old_slots()
+        await coordinator._async_save_storage()
+
+        # Validate
+        result = validate_tomorrow_slots(
+            stored_slots=coordinator._stored_slots,
+            target_date=target,
+            tz=tz,
+            min_slots=min_slots,
+            min_price=min_price,
+            max_price=max_price,
+        )
+        coordinator.set_date_validity(
+            target, valid=result.valid,
+            slot_count=result.slot_count, expected_slots=result.expected_slots,
+            error=result.error, details=result.details,
+        )
+        await coordinator._async_save_storage()
+        coordinator.async_set_updated_data(coordinator._build_data())
+
+        if result.valid:
+            coordinator.log_activity("✅", f"fetch_date: {target.strftime('%d.%m.%Y')} validiert ({result.slot_count} Slots)")
+            if result.slot_count >= 24:
+                coordinator.reset_error_flags()
+                coordinator.restore_error_flags_from_validity()
+                hass.bus.async_fire("ekz_tariff_new_data", {
+                    "date": str(target),
+                    "entry_id": entry.entry_id,
+                })
+        else:
+            coordinator.log_activity("⚠️", f"fetch_date: {target.strftime('%d.%m.%Y')} ungültig: {result.details}")
+            coordinator.restore_error_flags_from_validity()
+
+    hass.services.async_register(DOMAIN, "fetch_date", _fetch_date_service)
+
+    # Raw API dump service — calls customerTariffs without filters, writes raw response to file
+    async def _dump_raw_service(call) -> None:
+        import json as _json
+        from homeassistant.util import dt as _dt_util
+        coordinator.log_activity("📥", "Raw API Dump gestartet")
+        now_local = _dt_util.now()
+        tomorrow = (now_local + timedelta(days=1)).date()
+        tom_start = _dt_util.as_utc(datetime.combine(tomorrow, time(0, 0), tzinfo=now_local.tzinfo))
+        tom_end = tom_start + timedelta(days=1)
+        # Local time version: 2026-04-01T00:00:00+02:00
+        tom_start_local = datetime.combine(tomorrow, time(0, 0), tzinfo=now_local.tzinfo)
+        tom_end_local = tom_start_local + timedelta(days=1)
+        calls = [
+            ("NO FILTERS", dict(ems_instance_id=coordinator.ems_instance_id)),
+            ("tariffType=electricity_dynamic, no dates", dict(ems_instance_id=coordinator.ems_instance_id, tariff_type="electricity_dynamic")),
+            (f"UTC dates: {tom_start.isoformat()} - {tom_end.isoformat()}", dict(ems_instance_id=coordinator.ems_instance_id, tariff_type="electricity_dynamic", start_timestamp=tom_start.isoformat(), end_timestamp=tom_end.isoformat())),
+            (f"LOCAL dates: {tom_start_local.isoformat()} - {tom_end_local.isoformat()}", dict(ems_instance_id=coordinator.ems_instance_id, tariff_type="electricity_dynamic", start_timestamp=tom_start_local.isoformat(), end_timestamp=tom_end_local.isoformat())),
+            (f"LOCAL start only: {tom_start_local.isoformat()}", dict(ems_instance_id=coordinator.ems_instance_id, tariff_type="electricity_dynamic", start_timestamp=tom_start_local.isoformat())),
+            (f"LOCAL start only, NO tariffType: {tom_start_local.isoformat()}", dict(ems_instance_id=coordinator.ems_instance_id, start_timestamp=tom_start_local.isoformat())),
+            (f"LOCAL 01:30-02:30: {tom_start_local + timedelta(hours=1, minutes=30)} - {tom_start_local + timedelta(hours=2, minutes=30)}", dict(ems_instance_id=coordinator.ems_instance_id, tariff_type="electricity_dynamic", start_timestamp=(tom_start_local + timedelta(hours=1, minutes=30)).isoformat(), end_timestamp=(tom_start_local + timedelta(hours=2, minutes=30)).isoformat())),
+        ]
+        timestamp = _dt_util.now().strftime("%Y-%m-%d %H:%M:%S")
+        path = hass.config.path("ekz_tariff_raw_dump.log")
+        summary = []
+        with open(path, "a", encoding="utf-8") as f:
+            for label, params in calls:
+                f.write(f"\n{'='*60}\n[{timestamp}] {label}\n{'='*60}\n")
+                try:
+                    raw = await api.fetch_customer_tariffs(**params)
+                    count = len(raw.get("prices", []))
+                    f.write(f"Slot count: {count}\n")
+                    f.write(_json.dumps(raw, indent=2, default=str, ensure_ascii=False))
+                    summary.append(str(count))
+                except Exception as err:
+                    f.write(f"ERROR: {err}\n")
+                    summary.append("ERR")
+                f.write("\n")
+        coordinator.log_activity("📥", f"Raw Dump: {' / '.join(summary)} Slots")
+
+    hass.services.async_register(DOMAIN, "dump_raw", _dump_raw_service)
 
     # Test service to send dispatcher signal directly
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -370,6 +545,8 @@ def _cleanup_orphaned_entities(hass: HomeAssistant, entry: ConfigEntry) -> None:
         f"{eid}_invalid_data_error",
         f"{eid}_auth_error",
         f"{eid}_baseline_error",
+        f"{eid}_today_data_valid",
+        f"{eid}_tomorrow_data_valid",
     }
     registry = er.async_get(hass)
     to_remove = [
@@ -398,7 +575,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if callable(cancel):
             cancel()
     # Remove services so they get re-registered with fresh closures on reload
-    for svc in ("force_refresh", "update_setting", "clear_activity_log", "delete_activity_log_entry", "add_activity_log_entry"):
+    for svc in ("force_refresh", "fetch_date", "update_setting", "clear_activity_log", "delete_activity_log_entry", "add_activity_log_entry"):
         if hass.services.has_service(DOMAIN, svc):
             hass.services.async_remove(DOMAIN, svc)
     if unload_ok:
