@@ -6,6 +6,8 @@ DOMAIN = "ekz_tariff"
 CONF_PUBLISH_TIME = "publish_time"
 CONF_EMS_INSTANCE_ID = "ems_instance_id"
 CONF_REDIRECT_URI = "redirect_uri"
+CONF_MODE = "mode"  # "public" or "protected"
+CONF_TARIFF_NAME = "tariff_name"  # For public API
 
 # Validation settings
 CONF_MIN_SLOTS_PER_DAY = "min_slots_per_day"
@@ -18,6 +20,8 @@ CONF_DEBUG_MODE = "debug_mode"
 
 DEFAULT_PUBLISH_TIME = "18:15"
 DEFAULT_NAME = "EKZ Tariff"
+DEFAULT_MODE = "public"  # Default to public (no auth required)
+DEFAULT_TARIFF_NAME = "electricity_standard"  # Standard retail tariff
 
 DEFAULT_MIN_SLOTS_PER_DAY = 96
 DEFAULT_MIN_PRICE_CHF_PER_KWH = 0.10

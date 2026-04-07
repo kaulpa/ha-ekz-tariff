@@ -6,9 +6,15 @@
         "description": "Configure the EKZ tariff integration.",
         "data": {
           "name": "Name",
-          "redirect_uri": "EKZ linking redirect URI",
-          "publish_time": "Publish time (HH:MM)"
+          "mode": "Tariff Mode",
+          "redirect_uri": "EKZ linking redirect URI (for protected mode)",
+          "publish_time": "Publish time (HH:MM)",
+          "tariff_name": "Tariff Name (for public mode)"
         }
+      },
+      "public_confirm": {
+        "title": "Public Tariff Configuration",
+        "description": "Using public tariff: {tariff} ({name})\nNo authentication required."
       },
       "reauth_confirm": {
         "title": "Reconnect EKZ Tariff",

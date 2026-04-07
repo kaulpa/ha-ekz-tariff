@@ -6,17 +6,27 @@
         "description": "Konfiguriere die EKZ-Tarif-Integration.",
         "data": {
           "name": "Name",
-          "redirect_uri": "EKZ-Linking-Redirect-URI",
-          "publish_time": "Publikationszeit (HH:MM)"
+          "mode": "Tarif-Modus",
+          "redirect_uri": "EKZ-Linking-Redirect-URI (für geschützten Modus)",
+          "publish_time": "Publikationszeit (HH:MM)",
+          "tariff_name": "Tariname (für öffentlichen Modus)"
         }
+      },
+      "public_confirm": {
+        "title": "Öffentlicher Tarif konfiguriert",
+        "description": "Verwende öffentlichen Tarif: {tariff} ({name})\nKeine Authentifizierung erforderlich."
       },
       "reauth_confirm": {
         "title": "EKZ Tariff erneut verbinden",
         "description": "Bitte erneut bei myEKZ anmelden."
       }
     },
-    "error": {},
-    "abort": {}
+    "error": {
+      "cannot_reauth_public_mode": "Öffentlicher Modus kann nicht erneut authentifiziert werden"
+    },
+    "abort": {
+      "cannot_reauth_public_mode": "Öffentlicher Modus kann nicht erneut authentifiziert werden"
+    }
   },
   "options": {
     "step": {

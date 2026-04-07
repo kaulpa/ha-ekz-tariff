@@ -13,7 +13,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homeassistant.util import dt as dt_util
 
 from .api import EkzTariffApi, EkzTariffAuthError
-from .const import CONF_DEBUG_MODE, CONF_EMS_INSTANCE_ID, CONF_REDIRECT_URI
+from .const import CONF_DEBUG_MODE, CONF_EMS_INSTANCE_ID, CONF_MODE, CONF_REDIRECT_URI, CONF_TARIFF_NAME
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -50,6 +50,8 @@ class EkzTariffCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.hass = hass
         self.api = api
         self.config = config
+        self.mode: str = config.get(CONF_MODE, "public")  # "public" or "protected"
+        self.tariff_name: str = config.get(CONF_TARIFF_NAME, "electricity_standard")  # For public mode
         self.ems_instance_id: str | None = config.get(CONF_EMS_INSTANCE_ID)
         self.redirect_uri: str | None = config.get(CONF_REDIRECT_URI)
         self.last_api_success_utc: datetime | None = None
@@ -255,6 +257,66 @@ class EkzTariffCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # -- Fetch --
 
     async def _async_update_data(self) -> dict[str, Any]:
+        """Fetch tomorrow's tariffs (public or protected mode)."""
+        if self.mode == "public":
+            return await self._async_update_data_public()
+        else:
+            return await self._async_update_data_protected()
+
+    async def _async_update_data_public(self) -> dict[str, Any]:
+        """Fetch tomorrow's tariffs from public API (no auth needed)."""
+        now_local = dt_util.now()
+        tomorrow = (now_local + timedelta(days=1)).date()
+        tom_start = dt_util.as_utc(datetime.combine(tomorrow, _time(0, 0), tzinfo=now_local.tzinfo))
+        tom_end = tom_start + timedelta(days=1)
+
+        try:
+            payload = await self.api.fetch_public_tariff(
+                tariff_name=self.tariff_name,
+                start=tom_start,
+                end=tom_end,
+            )
+        except Exception as err:
+            self.log_activity("❌", f"Public API Fetch fehlgeschlagen: {err}")
+            raise UpdateFailed(f"EKZ public tariff failed: {err}") from err
+
+        # Parse slots
+        new_slots = self._parse_public_slots(payload)
+
+        if not new_slots:
+            self.log_activity("⚠️", "Keine Tomorrow-Slots erhalten")
+            _LOGGER.info("EKZ: No tomorrow slots received from public API, keeping existing data")
+            return self._build_data()
+
+        # Extract publication timestamp
+        pub_ts = payload.get("publication_timestamp") if isinstance(payload, dict) else None
+        if isinstance(pub_ts, str):
+            parsed = dt_util.parse_datetime(pub_ts)
+            if parsed:
+                self._publication_timestamp = dt_util.as_utc(parsed)
+
+        # Merge into stored slots
+        for ts_key, components in new_slots.items():
+            self._stored_slots[ts_key] = components
+
+        # Clean up old slots (>2 days)
+        self._cleanup_old_slots()
+
+        # Save
+        self._last_fetch_utc = dt_util.utcnow()
+        self.last_api_success_utc = self._last_fetch_utc
+        await self._async_save_storage()
+
+        self.log_activity("📡", f"{len(new_slots)} Tomorrow-Slots abgerufen (total: {len(self._stored_slots)})")
+        _LOGGER.info("EKZ: Fetched %d tomorrow slots from public API, total stored: %d", len(new_slots), len(self._stored_slots))
+
+        # Validate
+        if self.on_new_tomorrow_data is not None:
+            await self.on_new_tomorrow_data(tomorrow)
+
+        return self._build_data()
+
+    async def _async_update_data_protected(self) -> dict[str, Any]:
         """Fetch tomorrow's tariffs from customerTariffs (OAuth)."""
         if not self.ems_instance_id:
             raise UpdateFailed("EKZ Tariff: ems_instance_id not configured")
@@ -452,6 +514,39 @@ class EkzTariffCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
             components: dict[str, float] = {}
             for key in ("electricity", "grid", "regional_fees", "metering", "integrated", "feed_in", "refund_storage"):
+                value = self._extract_chf_per_kwh(item.get(key))
+                if value is not None:
+                    components[key] = value
+
+            if components:
+                utc_key = dt_util.as_utc(dt_start).isoformat()
+                result[utc_key] = components
+
+        return result
+
+    def _parse_public_slots(self, payload: Any) -> dict[str, dict[str, float]]:
+        """Parse public tariff response into {start_ts: {component: value}} dict."""
+        if isinstance(payload, dict):
+            raw_prices = payload.get("prices", [])
+        elif isinstance(payload, list):
+            raw_prices = payload
+        else:
+            return {}
+
+        result: dict[str, dict[str, float]] = {}
+        for item in raw_prices:
+            if not isinstance(item, dict):
+                continue
+            start_ts = item.get("start_timestamp")
+            if not isinstance(start_ts, str):
+                continue
+            dt_start = dt_util.parse_datetime(start_ts)
+            if dt_start is None:
+                continue
+
+            components: dict[str, float] = {}
+            # Public API mainly has "electricity" component
+            for key in ("electricity", "integrated"):
                 value = self._extract_chf_per_kwh(item.get(key))
                 if value is not None:
                     components[key] = value

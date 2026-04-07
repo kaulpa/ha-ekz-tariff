@@ -126,8 +126,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     config["entry_id"] = entry.entry_id
 
     session = async_get_clientsession(hass)
-    implementation = await config_entry_oauth2_flow.async_get_config_entry_implementation(hass, entry)
-    oauth_session = config_entry_oauth2_flow.OAuth2Session(hass, entry, implementation)
+    
+    # Only set up OAuth session for protected mode
+    oauth_session = None
+    mode = config.get("mode", "public")
+    if mode == "protected":
+        implementation = await config_entry_oauth2_flow.async_get_config_entry_implementation(hass, entry)
+        oauth_session = config_entry_oauth2_flow.OAuth2Session(hass, entry, implementation)
+    
     api = EkzTariffApi(session, oauth_session=oauth_session)
 
     coordinator = EkzTariffCoordinator(hass, api, config=config)
@@ -239,21 +245,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             retry_state["pending_cancel"] = async_call_later(hass, retry_interval_sec, _retry_callback)
             return
 
-        # 3. Compute baseline (if needed for new quarter)
-        baseline_ok = await coordinator.async_compute_baseline()
-        if not baseline_ok:
-            coordinator.baseline_error = True
-            coordinator.set_date_validity(
-                target_date, valid=False,
-                slot_count=result.slot_count, expected_slots=result.expected_slots,
-                error="baseline_failed",
-                details="Baseline-Berechnung fehlgeschlagen",
-            )
-            await coordinator._async_save_storage()
-            coordinator.log_activity("❌", "Baseline-Berechnung fehlgeschlagen")
-            _LOGGER.error("EKZ: Baseline computation failed")
-            coordinator.async_set_updated_data(coordinator.data)
-            return
+        # 3. Compute baseline (only for protected mode with customerTariffs)
+        if mode == "protected":
+            baseline_ok = await coordinator.async_compute_baseline()
+            if not baseline_ok:
+                coordinator.baseline_error = True
+                coordinator.set_date_validity(
+                    target_date, valid=False,
+                    slot_count=result.slot_count, expected_slots=result.expected_slots,
+                    error="baseline_failed",
+                    details="Baseline-Berechnung fehlgeschlagen",
+                )
+                await coordinator._async_save_storage()
+                coordinator.log_activity("❌", "Baseline-Berechnung fehlgeschlagen")
+                _LOGGER.error("EKZ: Baseline computation failed")
+                coordinator.async_set_updated_data(coordinator.data)
+                return
 
         # 4. All good — reset errors and signal Tariff Saver
         coordinator.reset_error_flags()
@@ -304,7 +311,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # Validation runs inside _async_update_data via on_new_tomorrow_data callback
 
     async def _proactive_token_refresh(_now) -> None:
-        """Keep OAuth token alive."""
+        """Keep OAuth token alive (protected mode only)."""
+        if mode != "protected" or oauth_session is None:
+            return
         try:
             await oauth_session.async_ensure_token_valid()
             _LOGGER.debug("EKZ proactive token refresh OK")
@@ -315,9 +324,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data[DOMAIN][f"{entry.entry_id}_unsub_daily"] = async_track_time_change(
         hass, _daily_refresh, hour=hour, minute=minute, second=0
     )
-    hass.data[DOMAIN][f"{entry.entry_id}_unsub_token"] = async_track_time_interval(
-        hass, _proactive_token_refresh, timedelta(hours=20)
-    )
+    
+    # Only schedule token refresh for protected mode
+    if mode == "protected":
+        hass.data[DOMAIN][f"{entry.entry_id}_unsub_token"] = async_track_time_interval(
+            hass, _proactive_token_refresh, timedelta(hours=20)
+        )
 
     # Activity log services
     async def handle_ekz_clear_log(call) -> None:
